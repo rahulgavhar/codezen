@@ -13,7 +13,6 @@ const StaffScheduleInterview = () => {
   if (profile?.app_role !== 'staff') {
     return <Navigate to="/" />;
   }
-  const [users, setUsers] = useState([]);
   const [problems, setProblems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -26,17 +25,13 @@ const StaffScheduleInterview = () => {
   });
 
   useEffect(() => {
-    // Fetch users for candidate selection
+    // Fetch problems
     const fetchData = async () => {
       try {
-        const [usersRes, problemsRes] = await Promise.all([
-          axiosInstance.get('/api/users'),
-          axiosInstance.get('/api/problems')
-        ]);
-        setUsers(usersRes.data.filter(u => u.app_role === 'user'));
-        setProblems(problemsRes.data);
+        const problemsRes = await axiosInstance.get('/api/problems?page=1&limit=100');
+        setProblems(problemsRes.data?.data || []);
       } catch (error) {
-        console.error('Error fetching data:', error);
+        console.error('Error fetching problems:', error);
       }
     };
 
@@ -65,20 +60,51 @@ const StaffScheduleInterview = () => {
       setLoading(true);
       setError(null);
 
-      if (!formData.room_id) {
-        generateRoomId();
+      // Validate required fields
+      if (!formData.candidate_clerk_id.trim()) {
+        setError('Candidate Clerk ID is required');
+        setLoading(false);
+        return;
       }
 
+      if (!formData.start_time || !formData.end_time) {
+        setError('Start time and end time are required');
+        setLoading(false);
+        return;
+      }
+
+      // Convert datetime-local format to ISO string
+      // datetime-local returns format like "2026-03-29T14:00" in local time
+      const startDate = new Date(formData.start_time);
+      const endDate = new Date(formData.end_time);
+
+      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+        setError('Invalid start or end time format');
+        setLoading(false);
+        return;
+      }
+
+      if (endDate <= startDate) {
+        setError('End time must be after start time');
+        setLoading(false);
+        return;
+      }
+
+      const finalRoomId = formData.room_id || `room_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+
       const submissionData = {
-        ...formData,
-        interviewer_clerk_id: profile?.clerk_user_id,
-        status: 'Scheduled',
+        candidate_clerk_id: formData.candidate_clerk_id.trim(),
+        problem_id: formData.problem_id || null,
+        room_id: finalRoomId,
+        start_time: startDate.toISOString(),
+        end_time: endDate.toISOString(),
       };
 
+      console.log('Submitting interview data:', submissionData);
       const response = await axiosInstance.post('/api/interviews', submissionData);
       navigate(`/staff/interviews/${response.data.id}`);
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to schedule interview');
+      setError(err.response?.data?.message || err.response?.data?.error || 'Failed to schedule interview');
       console.error('Error scheduling interview:', err);
     } finally {
       setLoading(false);
@@ -113,21 +139,19 @@ const StaffScheduleInterview = () => {
 
               {/* Candidate */}
               <div>
-                <label className="block text-sm font-medium text-slate-300">Candidate *</label>
-                <select
-                  name="candidate_clerk_id"
+                <label className="block text-sm font-medium text-slate-300">Candidate ID *</label>
+                <input
+                  type="text"
+                  placeholder="e.g., user_3BZL4z0thn"
                   value={formData.candidate_clerk_id}
-                  onChange={handleInputChange}
+                  onChange={(e) => setFormData((prev) => ({
+                    ...prev,
+                    candidate_clerk_id: e.target.value,
+                  }))}
                   required
-                  className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-slate-50 focus:border-cyan-400 focus:outline-none"
-                >
-                  <option value="">Select a candidate...</option>
-                  {users.map((user) => (
-                    <option key={user.clerk_user_id} value={user.clerk_user_id}>
-                      {user.display_name || user.clerk_user_id}
-                    </option>
-                  ))}
-                </select>
+                  className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-slate-50 placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+                />
+                <p className="mt-1 text-xs text-slate-500">Enter the candidate's Clerk User ID</p>
               </div>
 
               {/* Problem (Optional) */}

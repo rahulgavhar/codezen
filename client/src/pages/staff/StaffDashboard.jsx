@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
-import { Link, Navigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import Header from '../../components/Header';
 import Footer from '../../components/Footer';
 import axiosInstance from '../../lib/axios';
 
 const StaffDashboard = () => {
   const profile = useSelector((state) => state.user?.profile);
+  const navigate = useNavigate();
   
   // Redirect non-staff users
   if (profile?.app_role !== 'staff') {
@@ -155,9 +156,19 @@ const StaffDashboard = () => {
                       <p className="text-sm text-slate-400">Status: <span className="text-amber-400">{interview.status}</span></p>
                       <p className="mt-1 text-xs text-slate-500">{formatDateTime(interview.start_time)}</p>
                     </div>
-                    <Link to={`/staff/interviews/${interview.id}`} className="rounded-lg bg-cyan-500/20 px-4 py-2 text-cyan-400 transition hover:bg-cyan-500/30">
-                      View
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      {(interview.status === 'Scheduled' || interview.status === 'Ongoing') && (
+                        <button
+                          onClick={() => navigate(`/interview/${interview.id}`)}
+                          className="rounded-lg bg-emerald-500/20 px-4 py-2 text-emerald-400 transition hover:bg-emerald-500/30 border border-emerald-500/30 hover:border-emerald-500/50"
+                        >
+                          Join
+                        </button>
+                      )}
+                      <Link to={`/staff/interviews/${interview.id}`} className="rounded-lg bg-cyan-500/20 px-4 py-2 text-cyan-400 transition hover:bg-cyan-500/30">
+                        View
+                      </Link>
+                    </div>
                   </div>
                 ))}
               </div>

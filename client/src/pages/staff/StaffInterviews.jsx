@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
-import { Link, Navigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import Header from '../../components/Header';
 import Footer from '../../components/Footer';
 import axiosInstance from '../../lib/axios';
 
 const StaffInterviews = () => {
   const profile = useSelector((state) => state.user?.profile);
+  const navigate = useNavigate();
   
   // Redirect non-staff users
   if (profile?.app_role !== 'staff') {
@@ -42,12 +43,31 @@ const StaffInterviews = () => {
 
   const getStatusBadge = (status) => {
     const styles = {
-      scheduled: 'bg-blue-500/20 text-blue-400',
-      ongoing: 'bg-cyan-500/20 text-cyan-400',
-      completed: 'bg-emerald-500/20 text-emerald-400',
-      cancelled: 'bg-red-500/20 text-red-400',
+      scheduled: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+      ongoing: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
+      completed: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+      cancelled: 'bg-red-500/20 text-red-400 border-red-500/30',
     };
-    return styles[status.toLowerCase()] || 'bg-slate-500/20 text-slate-400';
+    return styles[status.toLowerCase()] || 'bg-slate-500/20 text-slate-400 border-slate-500/30';
+  };
+
+  const getDifficultyColor = (difficulty) => {
+    const colors = {
+      easy: 'text-emerald-400',
+      medium: 'text-amber-400',
+      hard: 'text-red-400',
+    };
+    return colors[difficulty?.toLowerCase()] || 'text-slate-400';
+  };
+
+  const getInterviewDuration = (start, end) => {
+    const ms = new Date(end) - new Date(start);
+    const minutes = Math.floor(ms / 60000);
+    const hours = Math.floor(minutes / 60);
+    if (hours > 0) {
+      return `${hours}h ${minutes % 60}m`;
+    }
+    return `${minutes}m`;
   };
 
   const formatDateTime = (date) => {
@@ -121,43 +141,80 @@ const StaffInterviews = () => {
                 <Link
                   key={interview.id}
                   to={`/staff/interviews/${interview.id}`}
-                  className="group rounded-lg border border-white/10 bg-white/5 p-6 transition hover:border-cyan-400/60 hover:bg-white/10"
+                  className="group block rounded-lg border border-white/10 bg-linear-to-r from-white/5 to-white/2 p-5 transition hover:border-cyan-400/60 hover:from-white/10 hover:to-white/5"
                 >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="mb-2 flex items-center gap-3">
-                        <h3 className="font-semibold text-cyan-400 group-hover:text-cyan-300">
-                          Interview with {interview.candidate_clerk_id}
+                  <div className="space-y-4">
+                    {/* Top Row: Title and Status */}
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-slate-100 group-hover:text-cyan-300 transition truncate">
+                          {interview.problem?.title || 'Interview'}
                         </h3>
-                        <span className={`rounded px-2 py-1 text-xs font-medium capitalize ${getStatusBadge(interview.status)}`}>
-                          {interview.status}
-                        </span>
+                        <p className="mt-1 text-sm text-slate-400 truncate">
+                          Candidate: {interview.candidate_clerk_id}
+                        </p>
                       </div>
-                      <p className="mb-3 text-sm text-slate-400">
-                        {formatDateTime(interview.start_time)} - {formatDateTime(interview.end_time)}
-                      </p>
-                      <div className="flex gap-4 text-xs text-slate-500">
-                        {interview.room_id && (
-                          <span>
-                            <span className="font-medium">Room:</span> {interview.room_id}
-                          </span>
-                        )}
-                        {interview.problem_id && (
-                          <span>
-                            <span className="font-medium">Problem:</span> {interview.problem_id}
-                          </span>
-                        )}
-                        {interview.technical_score && (
-                          <span>
-                            <span className="font-medium">Score:</span> {interview.technical_score}/100
-                          </span>
-                        )}
+                      <span className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wider ${getStatusBadge(interview.status)}`}>
+                        {interview.status}
+                      </span>
+                    </div>
+
+                    {/* Middle Row: Date/Time and Duration */}
+                    <div className="flex items-center gap-4 text-sm">
+                      <div className="flex items-center gap-2 text-slate-300">
+                        <span>📅</span>
+                        <span>{new Date(interview.start_time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-slate-300">
+                        <span>🕐</span>
+                        <span>{new Date(interview.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-slate-400 text-xs">
+                        <span>⏱</span>
+                        <span>{getInterviewDuration(interview.start_time, interview.end_time)}</span>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <span className="inline-block rounded bg-white/10 px-3 py-1 text-xs font-medium text-slate-300">
-                        View →
-                      </span>
+
+                    {/* Bottom Row: Problem Details and Actions */}
+                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-white/5">
+                      <div className="flex items-center gap-4 text-xs text-slate-400">
+                        {interview.problem?.difficulty && (
+                          <span className="flex items-center gap-1">
+                            <span>◆</span>
+                            <span className={getDifficultyColor(interview.problem.difficulty)}>
+                              {interview.problem.difficulty.charAt(0).toUpperCase() + interview.problem.difficulty.slice(1)}
+                            </span>
+                          </span>
+                        )}
+                        {interview.technical_score !== null && (
+                          <span className="flex items-center gap-1 text-emerald-400">
+                            <span>⭐</span>
+                            <span>{interview.technical_score}/100</span>
+                          </span>
+                        )}
+                        {interview.room_id && (
+                          <span className="flex items-center gap-1 text-cyan-400">
+                            <span>🔗</span>
+                            <span className="font-mono">{interview.room_id.substring(0, 12)}...</span>
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {(interview.status === 'Scheduled' || interview.status === 'Ongoing') && (
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              navigate(`/interview/${interview.id}`);
+                            }}
+                            className="rounded-lg bg-emerald-500/20 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/30 transition border border-emerald-500/30 hover:border-emerald-500/50"
+                          >
+                            Join Interview
+                          </button>
+                        )}
+                        <span className="inline-block rounded bg-cyan-500/20 px-3 py-1 text-xs font-medium text-cyan-300 group-hover:bg-cyan-500/30 transition">
+                          View Details →
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </Link>

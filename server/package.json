@@ -23,7 +23,8 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "node-cron": "^4.2.1",
-    "postgres": "^3.4.8"
+    "postgres": "^3.4.8",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
     "supabase": "^2.72.3"

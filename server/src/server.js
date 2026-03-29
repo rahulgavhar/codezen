@@ -1,5 +1,15 @@
 import express from "express";
+import http from "http";
+import { Server } from "socket.io";
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+});
 import { ENV } from "./config/env.config.js";
 import path from "path";
 const __dirname = path.resolve();
@@ -11,8 +21,10 @@ import usersRoutes from "./routes/users.route.js";
 import submissionsRoutes from "./routes/submissions.route.js";
 import webhooksRoutes from "./routes/webhooks.route.js";
 import problemsRoutes from "./routes/problems.route.js";
+import interviewsRoutes from "./routes/interviews.route.js";
 import { startVMSyncJob } from "./jobs/vmSync.job.js";
 import { trackActivityAndStartVM } from "./middleware/auth.middleware.js";
+import { setupInterviewSignaling } from "./lib/webrtc.signaling.js";
 
 // Middleware
 
@@ -51,6 +63,8 @@ app.use("/api/webhooks", webhooksRoutes);
 app.use("/api/users", trackActivityAndStartVM, usersRoutes);
 // Submission Routes (with activity tracking)
 app.use("/api/submissions", trackActivityAndStartVM, submissionsRoutes);
+// Interview Routes (with activity tracking)
+app.use("/api/interviews", trackActivityAndStartVM, interviewsRoutes);
 
 // Global error handler
 app.use((err, req, res, next) => {
@@ -93,7 +107,10 @@ const startServer = async () => {
     // Start VM sync cron job 
     if(ENV.NODE_ENV === "production") startVMSyncJob();
     
-    app.listen(ENV.PORT, () => console.log(`Server is running on port ${ENV.PORT}`));
+    // Initialize WebRTC signaling
+    setupInterviewSignaling(io);
+    
+    server.listen(ENV.PORT, () => console.log(`Server is running on port ${ENV.PORT}`));
   } catch (error) {
     console.error("Failed to start server:", error);
   }

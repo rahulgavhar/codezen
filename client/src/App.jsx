@@ -100,8 +100,8 @@ function App() {
           element={isSignedIn && profile?.app_role !== 'staff' ? <AllInterviews /> : <Navigate to="/" />}
         />
         <Route
-          path="/interview/:id"
-          element={isSignedIn && profile?.app_role !== 'staff' ? <Interview /> : <Navigate to="/" />}
+          path="/interview/:interviewId"
+          element={isSignedIn ? <Interview /> : <Navigate to="/" />}
         />
         <Route
           path="/my-submissions"

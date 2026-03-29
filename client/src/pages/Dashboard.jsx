@@ -1,9 +1,10 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useSelector } from "react-redux";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import RatingGraph from "../components/RatingGraph";
+import axiosInstance from "../lib/axios";
 
 const upcomingContests = [
   {
@@ -35,38 +36,39 @@ const upcomingContests = [
   },
 ];
 
-const scheduledInterviews = [
-  {
-    id: "001",
-    candidate: "Sarah Chen",
-    position: "Senior SDE",
-    date: "Jan 9, 2026",
-    time: "3:00 PM",
-    type: "System Design",
-    status: "Confirmed",
-  },
-  {
-    id: "002",
-    candidate: "Michael Torres",
-    position: "SDE II",
-    date: "Jan 10, 2026",
-    time: "11:00 AM",
-    type: "Coding + Behavioral",
-    status: "Pending",
-  },
-  {
-    id: "003",
-    candidate: "Emily Watson",
-    position: "Junior SDE",
-    date: "Jan 11, 2026",
-    time: "1:30 PM",
-    type: "DSA Focus",
-    status: "Confirmed",
-  },
-];
-
 const Dashboard = () => {
   const profile = useSelector((state) => state.user?.profile);
+  const [scheduledInterviews, setScheduledInterviews] = useState([]);
+  const [loadingInterviews, setLoadingInterviews] = useState(true);
+
+  useEffect(() => {
+    const fetchInterviews = async () => {
+      try {
+        setLoadingInterviews(true);
+        console.log("[Dashboard] Fetching interviews for user:", profile?.clerk_user_id);
+        
+        const response = await axiosInstance.get("/api/interviews", {
+          params: {
+            upcoming: true,
+            status: "Scheduled,Ongoing",
+            limit: 4,
+          },
+        });
+
+        console.log("[Dashboard] Received interviews:", response.data);
+        setScheduledInterviews(response.data || []);
+      } catch (error) {
+        console.error("Failed to fetch dashboard interviews:", error);
+        setScheduledInterviews([]);
+      } finally {
+        setLoadingInterviews(false);
+      }
+    };
+
+    if (profile?.app_role !== "staff" && profile?.clerk_user_id) {
+      fetchInterviews();
+    }
+  }, [profile?.app_role, profile?.clerk_user_id]);
   
   // Redirect staff users to staff dashboard
   if (profile?.app_role === 'staff') {
@@ -167,52 +169,69 @@ const Dashboard = () => {
               View all →
             </Link>
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            {scheduledInterviews.map((interview) => (
-              <article
-                key={interview.id}
-                className="group relative overflow-hidden rounded-2xl border border-white/10 bg-slate-900/80 p-5 shadow-xl shadow-slate-900/30 backdrop-blur transition hover:border-cyan-400/40 hover:shadow-cyan-500/20"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h3 className="text-lg font-semibold text-slate-50 group-hover:text-cyan-200">
-                      {interview.candidate}
-                    </h3>
-                    <p className="text-sm text-slate-400">{interview.position}</p>
-                  </div>
-                  <span
-                    className={`rounded-full px-3 py-1 text-xs font-semibold border ${
-                      interview.status === "Confirmed"
-                        ? "bg-emerald-400/15 text-emerald-200 border-emerald-400/30"
-                        : "bg-amber-400/15 text-amber-200 border-amber-400/30"
-                    }`}
-                  >
-                    {interview.status}
-                  </span>
-                </div>
-                <div className="mt-3 space-y-2 text-sm text-slate-300">
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-400">📅</span>
-                    <span>{interview.date} at {interview.time}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-400">💼</span>
-                    <span>{interview.type}</span>
-                  </div>
-                </div>
-                <Link
-                  to={`/interview/${interview.id}`}
-                  className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 transition hover:text-cyan-100"
+          {loadingInterviews ? (
+            <div className="text-slate-400">Loading interviews...</div>
+          ) : scheduledInterviews.length === 0 ? (
+            <div className="rounded-2xl border border-white/10 bg-slate-900/80 p-8 text-center">
+              <p className="text-slate-400">No upcoming interviews scheduled</p>
+              <p className="text-sm text-slate-500 mt-2">Check back soon or contact your interviewer</p>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {scheduledInterviews.map((interview) => (
+                <article
+                  key={interview.id}
+                  className="group relative overflow-hidden rounded-2xl border border-white/10 bg-slate-900/80 p-5 shadow-xl shadow-slate-900/30 backdrop-blur transition hover:border-cyan-400/40 hover:shadow-cyan-500/20"
                 >
-                  Join interview room
-                  <span aria-hidden className="transition-transform group-hover:translate-x-1">
-                    →
-                  </span>
-                </Link>
-              </article>
-            ))}
-          </div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold text-slate-50 group-hover:text-cyan-200">
+                        {interview.problem?.title || "Technical Interview"}
+                      </h3>
+                      <p className="text-sm text-slate-400 mt-1">
+                        with {interview.interviewer_clerk_id === profile?.clerk_user_id ? "Candidate" : "Interviewer"}
+                      </p>
+                    </div>
+                    <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold whitespace-nowrap ${
+                      interview.status === "Scheduled" ? "bg-blue-500/20 text-blue-400" :
+                      interview.status === "Ongoing" ? "bg-cyan-500/20 text-cyan-400" :
+                      interview.status === "Completed" ? "bg-emerald-500/20 text-emerald-400" :
+                      "bg-slate-500/20 text-slate-400"
+                    }`}>
+                      {interview.status}
+                    </span>
+                  </div>
+                  <div className="mt-4 space-y-2 text-sm text-slate-300">
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400">📅</span>
+                      <span>{new Date(interview.start_time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400">🕐</span>
+                      <span>{new Date(interview.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
+                    </div>
+                    {interview.room_id && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-400">🔗</span>
+                        <span className="font-mono text-xs">{interview.room_id.substring(0, 20)}...</span>
+                      </div>
+                    )}
+                  </div>
+                  <Link
+                    to={`/interview/${interview.id}`}
+                    className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 transition hover:text-cyan-100"
+                  >
+                    Join interview
+                    <span aria-hidden className="transition-transform group-hover:translate-x-1">
+                      →
+                    </span>
+                  </Link>
+                </article>
+              ))}
+            </div>
+          )}
         </section>
+
       </main>
 
       {/* Footer */}
