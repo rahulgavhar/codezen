@@ -657,8 +657,9 @@ class Main {
                   </div>
                 </div>
 
-                <div className="space-y-3 whitespace-pre-wrap text-sm text-slate-300">
-                  {problem.description}
+                <div className="space-y-3 text-sm text-slate-300 prose prose-invert max-w-none" style={{ color: 'inherit' }}>
+                  <style>{'.katex-html { display: none; }'}</style>
+                  <div dangerouslySetInnerHTML={{ __html: problem.description }} />
                 </div>
 
                 {problem.input_format && (
@@ -666,9 +667,10 @@ class Main {
                     <h3 className="font-semibold text-slate-100">
                       Input Format
                     </h3>
-                    <p className="whitespace-pre-wrap text-sm text-slate-400">
-                      {problem.input_format}
-                    </p>
+                    <div className="text-sm text-slate-400 prose prose-invert max-w-none" style={{ color: 'inherit' }}>
+                      <style>{'.katex-html { display: none; }'}</style>
+                      <div dangerouslySetInnerHTML={{ __html: problem.input_format }} />
+                    </div>
                   </div>
                 )}
 
@@ -677,20 +679,24 @@ class Main {
                     <h3 className="font-semibold text-slate-100">
                       Output Format
                     </h3>
-                    <p className="whitespace-pre-wrap text-sm text-slate-400">
-                      {problem.output_format}
-                    </p>
+                    <div className="text-sm text-slate-400 prose prose-invert max-w-none" style={{ color: 'inherit' }}>
+                      <style>{'.katex-html { display: none; }'}</style>
+                      <div dangerouslySetInnerHTML={{ __html: problem.output_format }} />
+                    </div>
                   </div>
                 )}
 
                 {problem.hints && problem.hints.length > 0 && (
                   <div className="space-y-2">
                     <h3 className="font-semibold text-slate-100">Hints</h3>
-                    <ul className="space-y-1">
+                    <ul className="space-y-2">
                       {problem.hints.map((hint, idx) => (
                         <li key={idx} className="flex gap-2">
-                          <span className="text-emerald-400">•</span>
-                          <span className="text-sm text-slate-400">{hint}</span>
+                          <span className="text-emerald-400 shrink-0 mt-1">•</span>
+                          <div className="text-sm text-slate-400 prose prose-invert max-w-none" style={{ color: 'inherit' }}>
+                            <style>{'.katex-html { display: none; }'}</style>
+                            <div dangerouslySetInnerHTML={{ __html: hint }} />
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -700,9 +706,10 @@ class Main {
                 {problem.constraints && (
                   <div className="space-y-2 border-t border-white/10 pt-6 mt-8">
                     <h3 className="font-semibold text-slate-100">Constraints</h3>
-                    <p className="whitespace-pre-wrap text-sm text-slate-400">
-                      {problem.constraints}
-                    </p>
+                    <div className="text-sm text-slate-400 prose prose-invert max-w-none" style={{ color: 'inherit' }}>
+                      <style>{'.katex-html { display: none; }'}</style>
+                      <div dangerouslySetInnerHTML={{ __html: problem.constraints }} />
+                    </div>
                   </div>
                 )}
               </div>
@@ -1038,7 +1045,7 @@ class Main {
             beforeMount={handleEditorWillMount}
             options={{
               minimap: { enabled: false },
-              fontSize: 14,
+              fontSize: 15,
               fontWeight: "500",
               lineNumbers: "on",
               roundedSelection: false,

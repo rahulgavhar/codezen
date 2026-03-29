@@ -26,19 +26,31 @@ const statusTone = {
 const ProblemsPage = () => {
   const navigate = useNavigate();
   const { user, isSignedIn } = useUser();
-  const [problems, setProblems] = useState([]);
+  const [allProblems, setAllProblems] = useState([]);
   const [selectedTopics, setSelectedTopics] = useState([]);
   const [selectedDifficulties, setSelectedDifficulties] = useState([]);
   const [query, setQuery] = useState("");
+  const [stagedTopics, setStagedTopics] = useState([]);
+  const [stagedDifficulties, setStagedDifficulties] = useState([]);
+  const [stagedQuery, setStagedQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [batchPage, setBatchPage] = useState(1);
   const itemsPerPage = 10;
+  const batchSize = 40;
 
   // Get topics from tags.json
   const topicsList = tags.topics;
 
-  // Fetch problems from API with filters
+  // Sync staged state with applied filters
+  useEffect(() => {
+    setStagedTopics(selectedTopics);
+    setStagedDifficulties(selectedDifficulties);
+    setStagedQuery(query);
+  }, [selectedTopics, selectedDifficulties, query]);
+
+  // Fetch problems from API with filters (batch loading)
   useEffect(() => {
     const fetchProblems = async () => {
       try {
@@ -46,8 +58,8 @@ const ProblemsPage = () => {
         
         // Build query string with filters
         const params = new URLSearchParams();
-        params.append('page', currentPage);
-        params.append('limit', itemsPerPage);
+        params.append('page', batchPage);
+        params.append('limit', batchSize);
         
         if (selectedTopics.length > 0) {
           params.append('topics', selectedTopics.join(','));
@@ -62,37 +74,46 @@ const ProblemsPage = () => {
         }
 
         const response = await axiosInstance.get(`/api/problems?${params.toString()}`);
-        setProblems(response.data.data || []);
+        
+        // For first batch, replace; for subsequent batches, append
+        if (batchPage === 1) {
+          setAllProblems(response.data.data || []);
+        } else {
+          setAllProblems((prev) => [...prev, ...(response.data.data || [])]);
+        }
         setError("");
       } catch (err) {
         console.error("Error fetching problems:", err);
         setError("Failed to fetch problems. Please try again later.");
-        setProblems([]);
+        if (batchPage === 1) setAllProblems([]);
       } finally {
         setLoading(false);
       }
     };
 
     fetchProblems();
-  }, [selectedTopics, selectedDifficulties, query, currentPage]);
+  }, [selectedTopics, selectedDifficulties, query, batchPage]);
 
   const handleTopicToggle = (topic) => {
-    setSelectedTopics((prev) =>
+    setStagedTopics((prev) =>
       prev.includes(topic) ? prev.filter((t) => t !== topic) : [...prev, topic]
     );
-    setCurrentPage(1); // Reset to page 1 when filter changes
   };
 
   const handleDifficultyToggle = (difficulty) => {
-    setSelectedDifficulties((prev) =>
+    setStagedDifficulties((prev) =>
       prev.includes(difficulty) ? prev.filter((d) => d !== difficulty) : [...prev, difficulty]
     );
-    setCurrentPage(1); // Reset to page 1 when filter changes
   };
 
   const handleSearch = () => {
-    // Reset to page 1 when searching
+    // Apply staged filters
+    setSelectedTopics(stagedTopics);
+    setSelectedDifficulties(stagedDifficulties);
+    setQuery(stagedQuery);
+    // Reset to page 1 and batch 1 when searching
     setCurrentPage(1);
+    setBatchPage(1);
     // Scroll to results section
     const resultsSection = document.querySelector('section');
     if (resultsSection) {
@@ -132,8 +153,8 @@ const ProblemsPage = () => {
               <div className="flex gap-2">
                 <input
                   type="text"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  value={stagedQuery}
+                  onChange={(e) => setStagedQuery(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSearch()}
                   placeholder="Search problems by title..."
                   className="flex-1 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none"
@@ -148,7 +169,7 @@ const ProblemsPage = () => {
                     <label key={topic} className="flex items-center gap-2 cursor-pointer">
                       <input
                         type="checkbox"
-                        checked={selectedTopics.includes(topic)}
+                        checked={stagedTopics.includes(topic)}
                         onChange={() => handleTopicToggle(topic)}
                         className="w-4 h-4 rounded border-white/20 bg-white/5 cursor-pointer"
                       />
@@ -166,7 +187,7 @@ const ProblemsPage = () => {
                     <label key={difficulty} className="flex items-center gap-2 cursor-pointer">
                       <input
                         type="checkbox"
-                        checked={selectedDifficulties.includes(difficulty)}
+                        checked={stagedDifficulties.includes(difficulty)}
                         onChange={() => handleDifficultyToggle(difficulty)}
                         className="w-4 h-4 rounded border-white/20 bg-white/5 cursor-pointer"
                       />
@@ -180,9 +201,9 @@ const ProblemsPage = () => {
               <div className="flex items-center justify-between">
                 <button
                   onClick={() => {
-                    setSelectedTopics([]);
-                    setSelectedDifficulties([]);
-                    setQuery("");
+                    setStagedTopics([]);
+                    setStagedDifficulties([]);
+                    setStagedQuery("");
                   }}
                   className="text-xs text-cyan-300 hover:text-cyan-200 transition hover:cursor-pointer"
                 >
@@ -201,12 +222,12 @@ const ProblemsPage = () => {
         </header>
 
         <section className="grid gap-4 md:grid-cols-2">
-          {loading ? (
+          {loading && batchPage === 1 ? (
             <div className="col-span-full text-center text-slate-400">Loading problems...</div>
           ) : error ? (
             <div className="col-span-full text-center text-red-400">{error}</div>
-          ) : problems.length > 0 ? (
-            problems.map((problem) => (
+          ) : allProblems.length > 0 ? (
+            allProblems.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((problem) => (
               <ProblemsCard key={problem.id} problem={problem} />
             ))
           ) : (
@@ -215,6 +236,41 @@ const ProblemsPage = () => {
             </div>
           )}
         </section>
+
+        {/* Auto-load next batch when approaching end */}
+        {(() => {
+          const startIdx = (currentPage - 1) * itemsPerPage;
+          const endIdx = startIdx + itemsPerPage;
+          if (endIdx >= allProblems.length && allProblems.length > 0 && allProblems.length === batchSize * batchPage && !loading) {
+            setTimeout(() => setBatchPage((prev) => prev + 1), 100);
+          }
+          return null;
+        })()}
+
+        {/* Pagination Controls */}
+        {allProblems.length > 0 && (
+          <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/50 p-4 mt-6">
+            <button
+              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1 || loading}
+              className="px-4 py-2 rounded-lg border border-white/10 bg-white/5 text-sm font-semibold text-slate-200 hover:border-cyan-400/50 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed transition"
+            >
+              ← Previous
+            </button>
+            
+            <span className="text-sm text-slate-400">
+              Page <span className="font-semibold text-slate-200">{currentPage}</span>
+            </span>
+            
+            <button
+              onClick={() => setCurrentPage((prev) => prev + 1)}
+              disabled={(currentPage * itemsPerPage >= allProblems.length) || loading}
+              className="px-4 py-2 rounded-lg border border-white/10 bg-white/5 text-sm font-semibold text-slate-200 hover:border-cyan-400/50 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed transition"
+            >
+              Next →
+            </button>
+          </div>
+        )}
       </main>
       <Footer />
     </div>

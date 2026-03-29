@@ -7,10 +7,15 @@ import Footer from "../components/Footer";
 import axiosInstance from "../lib/axios.js";
 
 const verdictColor = {
-  "Accepted": "text-emerald-400 bg-emerald-400/10 border-emerald-400/30",
-  "Wrong Answer": "text-rose-400 bg-rose-400/10 border-rose-400/30",
-  "Time Limit Exceeded": "text-rose-400 bg-rose-400/10 border-rose-400/30",
-  "Runtime Error": "text-orange-400 bg-orange-400/10 border-orange-400/30",
+  "pending": "text-slate-300 bg-slate-300/10 border-slate-300/30",
+  "accepted": "text-emerald-400 bg-emerald-400/10 border-emerald-400/30",
+  "wrong_answer": "text-rose-400 bg-rose-400/10 border-rose-400/30",
+  "time_limit": "text-rose-400 bg-rose-400/10 border-rose-400/30",
+  "compilation_error": "text-orange-400 bg-orange-400/10 border-orange-400/30",
+  "runtime_error": "text-orange-400 bg-orange-400/10 border-orange-400/30",
+  "internal_error": "text-slate-400 bg-slate-400/10 border-slate-400/30",
+  "exec_format_error": "text-slate-400 bg-slate-400/10 border-slate-400/30",
+  "error": "text-slate-400 bg-slate-400/10 border-slate-400/30",
 };
 
 const MySubmissions = () => {
