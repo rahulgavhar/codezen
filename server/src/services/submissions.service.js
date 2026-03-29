@@ -622,9 +622,18 @@ export async function updateTestCaseResultFromJudge0(judge0Token, judge0Data) {
       continue;
     }
 
-    // Count tests with accepted verdict - trust Judge0's determination
+    // For intermediate count, verify outputs just like final aggregation will do
     if (result.verdict === 'accepted') {
-      intermediatePassedCount++;
+      const actualTrimmed = (result.actual_output || '').trim();
+      const expectedTrimmed = (result.expected_output || '').trim();
+      
+      // Only count if both verdict is accepted AND outputs match
+      if (actualTrimmed === expectedTrimmed) {
+        intermediatePassedCount++;
+      } else {
+        // Mark as wrong_answer if output doesn't match
+        testResults[tcId].verdict = 'wrong_answer';
+      }
     }
   }
 
