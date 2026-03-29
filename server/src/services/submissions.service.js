@@ -68,12 +68,7 @@ export async function getSubmissionById(submissionId, clerkUserId) {
       description: submission.problems.description,
     } : null,
   };
-  
-  // Log intermediate poll responses showing progress
-  if (response.verdict === 'pending' && response.test_cases_passed > 0) {
-    console.log(`[getSubmissionById Poll] ID: ${submissionId.substring(0, 8)}, Progress: ${response.test_cases_passed}/${response.test_cases_total}`);
-  }
-  
+
   return response;
 }
 
@@ -513,6 +508,30 @@ function decodeBase64IfNeeded(data) {
   }
 }
 
+// Serialize webhook updates per submission to avoid concurrent overwrite races.
+const submissionWebhookLocks = new Map();
+
+async function withSubmissionWebhookLock(submissionId, operation) {
+  const previous = submissionWebhookLocks.get(submissionId) || Promise.resolve();
+  let releaseCurrent;
+
+  const current = new Promise((resolve) => {
+    releaseCurrent = resolve;
+  });
+
+  submissionWebhookLocks.set(submissionId, previous.then(() => current));
+  await previous;
+
+  try {
+    return await operation();
+  } finally {
+    releaseCurrent();
+    if (submissionWebhookLocks.get(submissionId) === current) {
+      submissionWebhookLocks.delete(submissionId);
+    }
+  }
+}
+
 /**
  * Update submission from a single test case Judge0 webhook
  * Handles result aggregation across all test cases
@@ -521,232 +540,192 @@ function decodeBase64IfNeeded(data) {
  * @returns {Promise<Object|null>} Updated submission or null if not found
  */
 export async function updateTestCaseResultFromJudge0(judge0Token, judge0Data) {
-  // Find submission that has this test case token in test_results
-  // Since webhooks fire within minutes, search recent submissions first (much faster)
-  
   let submission = null;
-  let testCaseId = null;
-  let testResults = null;
 
   try {
-    // OPTIMIZED: Use limited recent-submission search instead of full table scan
+    // Find candidate submission that contains this Judge0 token in test_results
     submission = await submissionsRepo.getSubmissionByTestCaseTokenFallback(judge0Token);
-
-    if (submission) {
-      // Found it! Extract test case ID
-      testResults = submission.test_results;
-      
-      for (const [tcId, tcResult] of Object.entries(testResults || {})) {
-        if (tcResult && tcResult.judge0_token === judge0Token) {
-          testCaseId = tcId;
-          break;
-        }
-      }
-    }
-
-    if (!submission || !testCaseId) {
-      console.warn(`Submission with Judge0 token ${judge0Token} not found`);
-      return null;
-    }
   } catch (err) {
     console.error('Error in updateTestCaseResultFromJudge0 lookup:', err);
     return null;
   }
 
-  if (!testResults) {
-    testResults = {};
+  if (!submission) {
+    console.warn(`Submission with Judge0 token ${judge0Token} not found`);
+    return null;
   }
 
-  // Decode base64 outputs from Judge0
-  const stdout = decodeBase64IfNeeded(judge0Data.stdout);
-  const stderr = decodeBase64IfNeeded(judge0Data.stderr);
-  const compileOutput = decodeBase64IfNeeded(judge0Data.compile_output);
-
-  // Judge0 status code to verdict map
-  const verdictMap = {
-    1: 'pending',
-    2: 'pending',
-    3: 'accepted',
-    4: 'wrong_answer',
-    5: 'time_limit',
-    6: 'compilation_error',
-    7: 'runtime_error',
-    8: 'runtime_error',
-    9: 'runtime_error',
-    10: 'runtime_error',
-    11: 'runtime_error',
-    12: 'runtime_error',
-    13: 'internal_error',
-    14: 'exec_format_error',
-  };
-
-  const testVerdict = verdictMap[judge0Data.status?.id] || 'pending';
-
-  // Update this specific test case result
-  testResults[testCaseId] = {
-    ...testResults[testCaseId],
-    judge0_token: judge0Token,
-    judge0_status_id: judge0Data.status?.id,
-    verdict: testVerdict,
-    actual_output: (stdout || '').trim(),
-    expected_output: testResults[testCaseId]?.expected_output || '',
-    runtime_ms: judge0Data.time ? Math.round(judge0Data.time * 1000) : null,
-    memory_kb: judge0Data.memory || null,
-    stderr: stderr || null,
-    compile_output: compileOutput || null,
-  };
-
-  // Check if all test cases have been judged (verdict must not be 'pending')
-  const allTestCasesJudged = Object.values(testResults).every(result => {
-    // Considered judged if: verdict exists and is NOT 'pending'
-    return result.verdict && result.verdict !== 'pending';
-  });
-
-  const verdictsList = Object.entries(testResults).map(([id, result]) => `${id.substring(0, 8)}: ${result.verdict}`);
-  const totalTests = Object.keys(testResults).length;
-  const nonPendingTests = Object.values(testResults).filter(r => r.verdict && r.verdict !== 'pending').length;
-  
-  console.log(`[updateTestCaseResultFromJudge0] Token ${judge0Token.substring(0, 8)}: allTestCasesJudged=${allTestCasesJudged}, ${nonPendingTests}/${totalTests} non-pending`);
-  console.log(`  Verdicts: ${verdictsList.join(', ')}`);
-
-  // ============================================================================
-  // INTERMEDIATE VERDICT CALCULATION (for partial results)
-  // Don't wait for all tests - update with what we know NOW
-  // ============================================================================
-  
-  let intermediatePassedCount = 0;
-
-  for (const [tcId, result] of Object.entries(testResults)) {
-    // Only count results that have been judged (not pending)
-    if (!result.verdict || result.verdict === 'pending') {
-      continue;
+  return await withSubmissionWebhookLock(submission.id, async () => {
+    const latestSubmission = await submissionsRepo.getSubmissionForTestCaseTracking(submission.id);
+    if (!latestSubmission || !latestSubmission.test_results || typeof latestSubmission.test_results !== 'object') {
+      console.warn(`Submission ${submission.id} missing test_results during webhook update`);
+      return null;
     }
 
-    // For intermediate count, verify outputs just like final aggregation will do
-    if (result.verdict === 'accepted') {
-      const actualTrimmed = (result.actual_output || '').trim();
-      const expectedTrimmed = (result.expected_output || '').trim();
-      
-      // Only count if both verdict is accepted AND outputs match
-      if (actualTrimmed === expectedTrimmed) {
-        intermediatePassedCount++;
-      } else {
-        // Mark as wrong_answer if output doesn't match
-        testResults[tcId].verdict = 'wrong_answer';
+    const testResults = { ...latestSubmission.test_results };
+    let testCaseId = null;
+
+    for (const [tcId, tcResult] of Object.entries(testResults)) {
+      if (tcResult && tcResult.judge0_token === judge0Token) {
+        testCaseId = tcId;
+        break;
       }
     }
-  }
 
-  console.log(`[updateTestCaseResultFromJudge0] Current progress: ${intermediatePassedCount} passed, ${nonPendingTests} judged, ${totalTests} total`);
+    if (!testCaseId) {
+      console.warn(`Test case ID not found for token ${judge0Token} in submission ${submission.id}`);
+      return null;
+    }
 
-  // If not all tests judged yet, update with intermediate verdict for UI feedback
-  if (!allTestCasesJudged) {
-    console.log(`  → Updating with intermediate results (not all tests judged yet)`);
-    
-    // Don't change verdict - keep it "pending" but update the results so frontend can see progress
-    // The frontend will keep polling and see the test_results and test_cases_passed incrementing
-    const updatePayload = {
-      test_results: testResults,
-      test_cases_passed: intermediatePassedCount,
-      // Don't include verdict key - let it stay as whatever it was (pending)
+    const stdout = decodeBase64IfNeeded(judge0Data.stdout);
+    const stderr = decodeBase64IfNeeded(judge0Data.stderr);
+    const compileOutput = decodeBase64IfNeeded(judge0Data.compile_output);
+
+    const verdictMap = {
+      1: 'pending',
+      2: 'pending',
+      3: 'accepted',
+      4: 'wrong_answer',
+      5: 'time_limit',
+      6: 'compilation_error',
+      7: 'runtime_error',
+      8: 'runtime_error',
+      9: 'runtime_error',
+      10: 'runtime_error',
+      11: 'runtime_error',
+      12: 'runtime_error',
+      13: 'internal_error',
+      14: 'exec_format_error',
     };
-    
-    console.log(`  → Updating DB with: test_cases_passed=${intermediatePassedCount}, test_results keys=${Object.keys(testResults).length}`);
-    
-    const intermediateUpdate = await submissionsRepo.updateSubmissionVerdict(submission.id, updatePayload);
-    console.log(`  → Submission updated: test results updated, passed=${intermediateUpdate.test_cases_passed}/${totalTests}`);
-    return intermediateUpdate;
-  }
 
-  // All test cases judged! Now aggregate the results
-  console.log(`[updateTestCaseResultFromJudge0] ✓ All tests judged! Aggregating results...`);
-  
-  // Compare actual vs expected output for each test
-  let passedCount = 0;
-  let hasCompilationError = false;
-  let hasRuntimeError = false;
-  let hasSubmissionError = false;
+    const testVerdict = verdictMap[judge0Data.status?.id] || 'pending';
 
-  for (const [tcId, result] of Object.entries(testResults)) {
-    console.log(`  [${tcId.substring(0, 8)}] verdict=${result.verdict}, expected="${(result.expected_output || '').substring(0, 40)}", actual="${(result.actual_output || '').substring(0, 40)}"`);
-    
-    // Check for submission errors first
-    if (result.verdict === 'error') {
-      hasSubmissionError = true;
-      console.log(`    → submission error`);
-    } 
-    // Check for compilation or runtime errors
-    else if (result.verdict === 'compilation_error') {
-      hasCompilationError = true;
-      console.log(`    → compilation error`);
-    } else if (result.verdict === 'runtime_error' || result.verdict === 'time_limit') {
-      hasRuntimeError = true;
-      console.log(`    → runtime/timeout error`);
-    } else if (result.verdict === 'accepted') {
-      // Verify output matches expected (same as run button does)
-      const actualTrimmed = (result.actual_output || '').trim();
-      const expectedTrimmed = (result.expected_output || '').trim();
-      
-      if (actualTrimmed === expectedTrimmed) {
-        passedCount++;
-        console.log(`    ✓ verdict accepted + output matches → passed`);
-      } else {
-        console.log(`    ✗ verdict accepted but output mismatch → wrong_answer`);
-        testResults[tcId].verdict = 'wrong_answer';
+    testResults[testCaseId] = {
+      ...testResults[testCaseId],
+      judge0_token: judge0Token,
+      judge0_status_id: judge0Data.status?.id,
+      verdict: testVerdict,
+      actual_output: (stdout || '').trim(),
+      expected_output: testResults[testCaseId]?.expected_output || '',
+      runtime_ms: judge0Data.time ? Math.round(judge0Data.time * 1000) : null,
+      memory_kb: judge0Data.memory || null,
+      stderr: stderr || null,
+      compile_output: compileOutput || null,
+    };
+
+    const allTestCasesJudged = Object.values(testResults).every(result => result.verdict && result.verdict !== 'pending');
+
+    const verdictsList = Object.entries(testResults).map(([id, result]) => `${id.substring(0, 8)}: ${result.verdict}`);
+    const totalTests = Object.keys(testResults).length;
+    const nonPendingTests = Object.values(testResults).filter(r => r.verdict && r.verdict !== 'pending').length;
+
+    console.log(`[updateTestCaseResultFromJudge0] Token ${judge0Token.substring(0, 8)}: allTestCasesJudged=${allTestCasesJudged}, ${nonPendingTests}/${totalTests} non-pending`);
+    console.log(`  Verdicts: ${verdictsList.join(', ')}`);
+
+    let intermediatePassedCount = 0;
+
+    for (const [tcId, result] of Object.entries(testResults)) {
+      if (!result.verdict || result.verdict === 'pending') {
+        continue;
+      }
+
+      if (result.verdict === 'accepted') {
+        const actualTrimmed = (result.actual_output || '').trim();
+        const expectedTrimmed = (result.expected_output || '').trim();
+
+        if (actualTrimmed === expectedTrimmed) {
+          intermediatePassedCount++;
+        } else {
+          testResults[tcId].verdict = 'wrong_answer';
+        }
       }
     }
-  }
 
-  // Determine final verdict
-  let finalVerdict = 'wrong_answer'; // Default: if any test fails
-  
-  if (hasSubmissionError) {
-    finalVerdict = 'internal_error';
-    console.warn(`  Result: internal_error (submission errors detected)`);
-  } else if (hasCompilationError) {
-    finalVerdict = 'compilation_error';
-    console.warn(`  Result: compilation_error`);
-  } else if (hasRuntimeError) {
-    finalVerdict = 'runtime_error';
-    console.warn(`  Result: runtime_error`);
-  } else if (passedCount === submission.test_cases_total) {
-    finalVerdict = 'accepted';
-    console.log(`  Result: accepted (${passedCount}/${submission.test_cases_total} passed)`);
-  } else {
-    console.log(`  Result: wrong_answer (${passedCount}/${submission.test_cases_total} passed)`);
-  }
+    console.log(`[updateTestCaseResultFromJudge0] Current progress: ${intermediatePassedCount} passed, ${nonPendingTests} judged, ${totalTests} total`);
 
-  // Aggregate runtime and memory from test results (take max values)
-  let maxRuntime = null;
-  let maxMemory = null;
-  
-  for (const result of Object.values(testResults)) {
-    if (result.runtime_ms !== null && result.runtime_ms !== undefined) {
-      maxRuntime = Math.max(maxRuntime || 0, result.runtime_ms);
+    if (!allTestCasesJudged) {
+      console.log(`  → Updating with intermediate results (not all tests judged yet)`);
+
+      const intermediateUpdate = await submissionsRepo.updateSubmissionVerdict(submission.id, {
+        test_results: testResults,
+        test_cases_passed: intermediatePassedCount,
+      });
+
+      console.log(`  → Submission updated: test results updated, passed=${intermediateUpdate.test_cases_passed}/${totalTests}`);
+      return intermediateUpdate;
     }
-    if (result.memory_kb !== null && result.memory_kb !== undefined) {
-      maxMemory = Math.max(maxMemory || 0, result.memory_kb);
+
+    console.log(`[updateTestCaseResultFromJudge0] ✓ All tests judged! Aggregating results...`);
+
+    let passedCount = 0;
+    let hasCompilationError = false;
+    let hasRuntimeError = false;
+    let hasSubmissionError = false;
+
+    for (const [tcId, result] of Object.entries(testResults)) {
+      if (result.verdict === 'error') {
+        hasSubmissionError = true;
+      } else if (result.verdict === 'compilation_error') {
+        hasCompilationError = true;
+      } else if (result.verdict === 'runtime_error' || result.verdict === 'time_limit') {
+        hasRuntimeError = true;
+      } else if (result.verdict === 'accepted') {
+        const actualTrimmed = (result.actual_output || '').trim();
+        const expectedTrimmed = (result.expected_output || '').trim();
+
+        if (actualTrimmed === expectedTrimmed) {
+          passedCount++;
+        } else {
+          testResults[tcId].verdict = 'wrong_answer';
+        }
+      }
     }
-  }
 
-  // Update submission with final verdict
-  const updateData = {
-    test_results: testResults,
-    test_cases_passed: passedCount,
-    verdict: finalVerdict,
-    judged_at: new Date().toISOString(),
-    runtime_ms: maxRuntime,
-    memory_kb: maxMemory,
-  };
+    let finalVerdict = 'wrong_answer';
 
-  // If there were submission errors, add error message
-  if (hasSubmissionError) {
-    updateData.error_message = 'Some test cases failed to execute on the server';
-  }
+    if (hasSubmissionError) {
+      finalVerdict = 'internal_error';
+    } else if (hasCompilationError) {
+      finalVerdict = 'compilation_error';
+    } else if (hasRuntimeError) {
+      finalVerdict = 'runtime_error';
+    } else if (passedCount === latestSubmission.test_cases_total) {
+      finalVerdict = 'accepted';
+    }
 
-  const finalSubmission = await submissionsRepo.updateSubmissionVerdict(submission.id, updateData);
-  console.log(`[updateTestCaseResultFromJudge0] ✓ Final submission saved: verdict=${finalSubmission.verdict}`);
-  return finalSubmission;
+    let maxRuntime = null;
+    let maxMemory = null;
+
+    for (const result of Object.values(testResults)) {
+      if (result.runtime_ms !== null && result.runtime_ms !== undefined) {
+        maxRuntime = Math.max(maxRuntime || 0, result.runtime_ms);
+      }
+      if (result.memory_kb !== null && result.memory_kb !== undefined) {
+        maxMemory = Math.max(maxMemory || 0, result.memory_kb);
+      }
+    }
+
+    const updateData = {
+      test_results: testResults,
+      test_cases_passed: passedCount,
+      verdict: finalVerdict,
+      judged_at: new Date().toISOString(),
+      runtime_ms: maxRuntime,
+      memory_kb: maxMemory,
+    };
+
+    if (hasSubmissionError) {
+      updateData.error_message = 'Some test cases failed to execute on the server';
+    }
+
+    const finalSubmission = await submissionsRepo.updateSubmissionVerdict(submission.id, updateData);
+    console.log(`[updateTestCaseResultFromJudge0] ✓ Final submission saved: verdict=${finalSubmission.verdict}`);
+    return finalSubmission;
+  });
+}
+
+export async function getSubmissionForTestCaseTracking(submissionId) {
+  return await submissionsRepo.getSubmissionForTestCaseTracking(submissionId);
 }
 
 /**

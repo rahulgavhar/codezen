@@ -85,10 +85,6 @@ export async function getSubmissionById(submissionId, clerkUserId) {
     throw error;
   }
 
-  if (data && data.verdict === 'pending' && data.test_cases_passed > 0) {
-    console.log(`[getSubmissionById] Fetched ${data.id.substring(0, 8)}: test_cases_passed=${data.test_cases_passed}/${data.test_cases_total}`);
-  }
-
   return data;
 }
 
@@ -129,11 +125,6 @@ export async function updateSubmissionVerdict(submissionId, updateData) {
   if (error) {
     console.error('Error updating submission verdict:', error);
     throw error;
-  }
-
-  // Log what was updated to verify the data round-trips correctly
-  if (updateData.test_cases_passed !== undefined) {
-    console.log(`[updateSubmissionVerdict] Returned test_cases_passed=${data.test_cases_passed}`);
   }
 
   return data;

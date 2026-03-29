@@ -71,8 +71,8 @@ router.put('/judge0', async (req, res) => {
           try {
             console.log(`[Stuck Test Poller] Checking submission ${submissionId.substring(0, 8)} for stuck tests...`);
             
-            // Fetch current submission to see if still pending
-            const submission = await submissionsService.getSubmissionById(submissionId, null);
+            // Fetch current submission without user scoping (internal webhook flow)
+            const submission = await submissionsService.getSubmissionForTestCaseTracking(submissionId);
             
             if (!submission) {
               stuckTestPollers.delete(submissionId);

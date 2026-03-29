@@ -302,7 +302,8 @@ class Main {
       
       // Adaptive polling: start fast, then back off
       let pollIntervalMs = 500; // Start with 500ms
-      const maxTimeoutMs = 120000; // 120 seconds (2 minutes) for full submission
+      const maxTotalTimeoutMs = 300000; // 5 minute hard cap
+      const maxInactivityMs = 45000; // 45 seconds without progress => timeout
       const startTime = Date.now();
 
       console.log(`Submission created: ${submissionId}, initial verdict: ${submissionData.verdict}`);
@@ -314,8 +315,10 @@ class Main {
       // Poll for final verdict with adaptive backoff
       while (!terminalVerdicts.includes(submissionData.verdict)) {
         const elapsedTime = Date.now() - startTime;
-        if (elapsedTime >= maxTimeoutMs) {
-          console.warn(`Polling timed out after ${elapsedTime}ms`);
+        const inactivityTime = Date.now() - lastUpdateTime;
+
+        if (elapsedTime >= maxTotalTimeoutMs || inactivityTime >= maxInactivityMs) {
+          console.warn(`Polling timed out (elapsed=${elapsedTime}ms, inactivity=${inactivityTime}ms)`);
           break;
         }
 
@@ -412,13 +415,34 @@ class Main {
       // Check if we timed out while still processing
       if (!terminalVerdicts.includes(submissionData.verdict)) {
         console.warn("Polling timed out - verdict still pending");
+
+        const partialCases = [];
+        if (submissionData.test_results && typeof submissionData.test_results === 'object') {
+          Object.entries(submissionData.test_results).forEach(([tcId, result]) => {
+            if (!result) return;
+            partialCases.push({
+              input_path: result.input_path || "",
+              output_path: result.output_path || "",
+              expected: result.expected_output || "",
+              output: result.actual_output || "",
+              passed: result.verdict === "accepted",
+              verdict: result.verdict || "unknown",
+              runtime: result.runtime_ms || null,
+              stderr: result.stderr || null,
+              compile_output: result.compile_output || null,
+              error: result.error || null,
+            });
+          });
+        }
+
         setTestResults({
           passed: submissionData.test_cases_passed || 0,
           total: submissionData.test_cases_total || 0,
-          cases: [],
+          cases: partialCases,
           verdict: "timeout",
           submissionId: submissionId,
           isFullSubmit: true,
+          isPartialResults: true,
           error: "Judging is taking longer than expected. Your submission is still being processed. Please check back later.",
         });
         setIsSubmitting(false);
