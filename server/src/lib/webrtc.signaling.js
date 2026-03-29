@@ -3,17 +3,44 @@ import { supabase } from "../config/supabase.client.js";
 // Store active interview rooms and participants
 const activeRooms = new Map();
 
+function isPastEndTime(interview) {
+  if (!interview?.end_time) return false;
+  return Date.now() > new Date(interview.end_time).getTime();
+}
+
+function shouldBeCompleted(interview) {
+  if (!interview) return false;
+  if (interview.status !== "Scheduled" && interview.status !== "Ongoing") return false;
+  return isPastEndTime(interview);
+}
+
+async function markCompletedIfPastEnd(interviewId) {
+  const { data: interview } = await supabase
+    .from("interviews")
+    .select("id, status, end_time")
+    .eq("id", interviewId)
+    .single();
+
+  if (shouldBeCompleted(interview)) {
+    await supabase
+      .from("interviews")
+      .update({ status: "Completed" })
+      .eq("id", interviewId);
+  }
+}
+
 export function setupInterviewSignaling(io) {
   io.on("connection", (socket) => {
     console.log(`[WebRTC] User connected: ${socket.id}`);
 
     // Join interview room
     socket.on("join-interview", async (data, callback) => {
+      const safeCallback = typeof callback === "function" ? callback : () => {};
       try {
         const { interviewId, clerkUserId, role } = data;
 
         if (!interviewId || !clerkUserId) {
-          return callback({
+          return safeCallback({
             success: false,
             error: "Missing interviewId or clerkUserId",
           });
@@ -22,12 +49,12 @@ export function setupInterviewSignaling(io) {
         // Verify interview exists and user is participant
         const { data: interview, error } = await supabase
           .from("interviews")
-          .select("id, candidate_clerk_id, interviewer_clerk_id, status")
+          .select("id, candidate_clerk_id, interviewer_clerk_id, status, start_time, end_time, candidate_connected, interviewer_connected")
           .eq("id", interviewId)
           .single();
 
         if (error || !interview) {
-          return callback({ success: false, error: "Interview not found" });
+          return safeCallback({ success: false, error: "Interview not found" });
         }
 
         // Verify user is a participant
@@ -35,14 +62,33 @@ export function setupInterviewSignaling(io) {
         const isInterviewer = interview.interviewer_clerk_id === clerkUserId;
 
         if (!isCandidate && !isInterviewer) {
-          return callback({
+          return safeCallback({
             success: false,
             error: "User is not a participant in this interview",
           });
         }
 
-        // Join the room
+        // Completed/cancelled interviews cannot be joined again.
+        if (interview.status === "Completed" || interview.status === "Cancelled") {
+          return safeCallback({
+            success: false,
+            error: "Interview room is closed",
+          });
+        }
+
+        // Check if time has passed and no one is currently connected
         const roomId = `interview_${interviewId}`;
+        const isPastEndTime = Date.now() > new Date(interview.end_time).getTime();
+        const anyoneConnected = interview.candidate_connected || interview.interviewer_connected;
+
+        if (isPastEndTime && !anyoneConnected) {
+          return safeCallback({
+            success: false,
+            error: "Interview has ended. New participants cannot join an empty room.",
+          });
+        }
+
+        // If room exists with participants, or time hasn't passed, allow join
         socket.join(roomId);
 
         // Initialize room if first participant
@@ -64,11 +110,23 @@ export function setupInterviewSignaling(io) {
           joinedAt: Date.now(),
         };
 
-        // Update interview status to "Ongoing"
+        // Mark participant as connected in database
+        const updateData = userRole === "interviewer" 
+          ? { interviewer_connected: true }
+          : { candidate_connected: true };
+        
         await supabase
           .from("interviews")
-          .update({ status: "Ongoing" })
+          .update(updateData)
           .eq("id", interviewId);
+
+        // Update interview status to "Ongoing" only while still active.
+        if (interview.status === "Scheduled") {
+          await supabase
+            .from("interviews")
+            .update({ status: "Ongoing" })
+            .eq("id", interviewId);
+        }
 
         // Log event
         await supabase.from("interview_events").insert({
@@ -97,7 +155,7 @@ export function setupInterviewSignaling(io) {
           role: userRole,
         });
 
-        callback({
+        safeCallback({
           success: true,
           roomId,
           otherParticipants,
@@ -105,7 +163,7 @@ export function setupInterviewSignaling(io) {
         });
       } catch (error) {
         console.error("[WebRTC] Error joining interview:", error);
-        callback({ success: false, error: error.message });
+        safeCallback({ success: false, error: error.message });
       }
     });
 
@@ -203,19 +261,29 @@ export function setupInterviewSignaling(io) {
           },
         });
 
-        // Remove participant from room
+        // Remove participant from room and get their role
         const room = activeRooms.get(roomId);
+        let userRole = null;
         if (room) {
+          userRole = room.participants[socket.id]?.role;
           delete room.participants[socket.id];
 
-          // If no participants left, mark interview as completed and delete room
+          // Clean up empty rooms (don't auto-complete based on time anymore)
           if (Object.keys(room.participants).length === 0) {
-            await supabase
-              .from("interviews")
-              .update({ status: "Completed" })
-              .eq("id", interviewId);
             activeRooms.delete(roomId);
           }
+        }
+
+        // Mark participant as disconnected in database
+        if (userRole) {
+          const updateData = userRole === "interviewer" 
+            ? { interviewer_connected: false }
+            : { candidate_connected: false };
+          
+          await supabase
+            .from("interviews")
+            .update(updateData)
+            .eq("id", interviewId);
         }
 
         // Notify others that user left
@@ -253,18 +321,24 @@ export function setupInterviewSignaling(io) {
             console.error("[WebRTC] Error logging disconnect event:", err);
           }
 
+          // Mark participant as disconnected in database
+          try {
+            const updateData = participant.role === "interviewer" 
+              ? { interviewer_connected: false }
+              : { candidate_connected: false };
+            
+            await supabase
+              .from("interviews")
+              .update(updateData)
+              .eq("id", room.interviewId);
+          } catch (err) {
+            console.error("[WebRTC] Error updating participant connected status:", err);
+          }
+
           delete room.participants[socket.id];
 
-          // If room is empty, mark as completed
+          // Clean up empty rooms (don't auto-complete based on time anymore)
           if (Object.keys(room.participants).length === 0) {
-            try {
-              await supabase
-                .from("interviews")
-                .update({ status: "Completed" })
-                .eq("id", room.interviewId);
-            } catch (err) {
-              console.error("[WebRTC] Error updating interview status:", err);
-            }
             activeRooms.delete(roomId);
           }
 

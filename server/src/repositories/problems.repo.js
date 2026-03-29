@@ -7,7 +7,7 @@ import { supabase } from '../config/supabase.client.js';
  * @param {number} options.limit - Items per page
  * @param {Array<string>} options.topics - Filter by topics/tags
  * @param {Array<string>} options.difficulties - Filter by difficulty
- * @param {string} options.search - Search in title or description
+ * @param {string} options.search - Search in title or match problem ID
  * @returns {Promise<{data: Array, count: number, total: number}>} Problems with pagination info
  */
 export async function getPublishedProblems(options = {}) {
@@ -75,13 +75,16 @@ export async function getPublishedProblems(options = {}) {
     });
   }
 
-  // Apply search filter in memory
+  // Apply search filter in title or ID (both checked)
   if (search.trim()) {
     const searchLower = search.toLowerCase();
-    problems = problems.filter(problem =>
-      problem.title.toLowerCase().includes(searchLower) ||
-      problem.description.toLowerCase().includes(searchLower)
-    );
+    problems = problems.filter(problem => {
+      // Check if search matches title
+      const matchesTitle = problem.title.toLowerCase().includes(searchLower);
+      // Check if search matches problem ID
+      const matchesId = problem.id === search || problem.id.toLowerCase() === searchLower;
+      return matchesTitle || matchesId;
+    });
   }
 
   // Format response data

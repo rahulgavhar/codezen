@@ -69,6 +69,7 @@ const ProblemsPage = () => {
           params.append('difficulties', selectedDifficulties.join(','));
         }
         
+        // Search in both title and problem ID
         if (query.trim()) {
           params.append('search', query.trim());
         }
@@ -149,16 +150,18 @@ const ProblemsPage = () => {
           {/* Filter Bar */}
           <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4 backdrop-blur">
             <div className="flex flex-col gap-4">
-              {/* Search */}
-              <div className="flex gap-2">
+              {/* Search - Title or Problem ID */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-2">Search by Title or Problem ID</label>
                 <input
                   type="text"
                   value={stagedQuery}
                   onChange={(e) => setStagedQuery(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                  placeholder="Search problems by title..."
-                  className="flex-1 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none"
+                  placeholder="e.g., 'palindrome' or '15dfd731-54b7-47d5-bc1c-4c42c73d1285'"
+                  className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none"
                 />
+                <p className="mt-1 text-xs text-slate-500">Search by problem title or by exact problem ID</p>
               </div>
 
               {/* Topics Multi-select */}

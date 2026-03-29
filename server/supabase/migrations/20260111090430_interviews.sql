@@ -37,6 +37,10 @@ CREATE TABLE public.interviews (
   -- Recording
   recording_url TEXT CHECK (char_length(recording_url) <= 500),
 
+  -- Participant connection status
+  candidate_connected BOOLEAN DEFAULT FALSE,
+  interviewer_connected BOOLEAN DEFAULT FALSE,
+
   created_at timestamptz NOT NULL DEFAULT now(),
 
   ----------------------------------------------------------------------
@@ -65,6 +69,12 @@ ON public.interviews(status);
 
 CREATE INDEX idx_interviews_start_time
 ON public.interviews(start_time ASC);
+
+CREATE INDEX idx_interviews_candidate_connected
+ON public.interviews(candidate_connected);
+
+CREATE INDEX idx_interviews_interviewer_connected
+ON public.interviews(interviewer_connected);
 
 --------------------------------------------------------------------------------
 -- Validation: lifecycle + feedback rules
@@ -172,3 +182,10 @@ CREATE POLICY "No interview deletes"
 ON public.interviews
 FOR DELETE
 USING (false);
+
+--------------------------------------------------------------------------------
+-- Column comments
+--------------------------------------------------------------------------------
+
+COMMENT ON COLUMN public.interviews.candidate_connected IS 'Tracks if candidate is currently connected to the interview room';
+COMMENT ON COLUMN public.interviews.interviewer_connected IS 'Tracks if interviewer is currently connected to the interview room';

@@ -545,6 +545,11 @@ class Main {
             &gt;_
           </div>
           <span className="text-sm font-semibold">Codezen</span>
+          <div className="h-4 border-l border-white/20"></div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400">ProblemId: </span>
+            <span className="font-mono text-sm font-bold text-cyan-300">{id}</span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-18 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-white/5">

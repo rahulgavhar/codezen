@@ -8,7 +8,7 @@ import * as problemsService from '../services/problems.service.js';
  *   - limit: items per page (default: 10, max: 100)
  *   - topics: comma-separated tag names (e.g., "graphs,sorting")
  *   - difficulties: comma-separated difficulties (e.g., "easy,medium")
- *   - search: search text for title/description
+ *   - search: search text for title or problem ID (e.g., "array" or "42")
  *   - status: filter by status (only public 'published' available)
  */
 export async function getProblems(req, res, next) {

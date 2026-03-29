@@ -7,6 +7,7 @@ import {
   getCurrentUserActivity,
   getCurrentUserRatingHistory,
   getPublicUserProfile,
+  getUserProfileByClerkId,
 } from "../controllers/users.controller.js";
 
 // Protected routes (require Clerk authentication)
@@ -17,5 +18,6 @@ router.get("/rating-history", getCurrentUserRatingHistory);
 
 // Public routes (no authentication required)
 router.get("/public/:username", getPublicUserProfile);
+router.get("/profile/:clerkUserId", getUserProfileByClerkId);
 
 export default router;

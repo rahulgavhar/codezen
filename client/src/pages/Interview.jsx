@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { io } from "socket.io-client";
+import axiosInstance from "../lib/axios";
 import CodeEditor from "./CodeEditor";
 import { LuCodeXml, LuScreenShareOff } from "react-icons/lu";
 import { FaMicrophone, FaMicrophoneSlash } from "react-icons/fa";
@@ -30,8 +31,8 @@ const Interview = () => {
   const interviewId = interviewIdParam || id;
   const profile = useSelector((state) => state.user?.profile);
 
-  const [muted, setMuted] = useState(false);
-  const [cameraOn, setCameraOn] = useState(true);
+  const [muted, setMuted] = useState(true);
+  const [cameraOn, setCameraOn] = useState(false);
   const [screenOn, setScreenOn] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
   const [showCode, setShowCode] = useState(false);
@@ -40,7 +41,12 @@ const Interview = () => {
   const [connectionStatus, setConnectionStatus] = useState("connecting");
   const [remoteParticipants, setRemoteParticipants] = useState({});
   const [permissionError, setPermissionError] = useState(null);
+  const [accessError, setAccessError] = useState(null);
   const [mediaError, setMediaError] = useState(null);
+  const [interviewData, setInterviewData] = useState(null);
+  const [timeRemaining, setTimeRemaining] = useState(0);
+  const [participantProfiles, setParticipantProfiles] = useState({});
+  const [participantCameraStatus, setParticipantCameraStatus] = useState({});
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
@@ -65,6 +71,22 @@ const Interview = () => {
     }
   }, [remoteParticipants]);
 
+  // Timer: Update remaining time every second
+  useEffect(() => {
+    if (!interviewData?.end_time) return;
+
+    const updateTimer = () => {
+      const now = Date.now();
+      const endTime = new Date(interviewData.end_time).getTime();
+      const remaining = Math.floor((endTime - now) / 1000);
+      setTimeRemaining(remaining);
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [interviewData]);
+
   // Initialize Socket.IO and WebRTC
   useEffect(() => {
     if (!interviewId || !profile?.clerk_user_id) return;
@@ -73,6 +95,45 @@ const Interview = () => {
     const initializeConnection = async () => {
       try {
         console.log("[Interview] Initializing for role:", profile?.app_role);
+
+        // Verify interview access and active status before initializing media.
+        try {
+          const interviewRes = await axiosInstance.get(`/api/interviews/${interviewId}`);
+          const interview = interviewRes.data;
+          const isParticipant =
+            interview.candidate_clerk_id === profile.clerk_user_id ||
+            interview.interviewer_clerk_id === profile.clerk_user_id;
+          const endedByStatus = interview.status === "Completed" || interview.status === "Cancelled";
+
+          if (!isParticipant) {
+            setAccessError("You are not authorized to join this interview room.");
+            setConnectionStatus("error");
+            return;
+          }
+
+          // Store interview data for timer (allows joining even after end_time)
+          setInterviewData({
+            start_time: interview.start_time,
+            end_time: interview.end_time,
+          });
+
+          // Only block if status is explicitly Completed/Cancelled
+          if (endedByStatus) {
+            setAccessError("This interview has ended and cannot be joined.");
+            setConnectionStatus("error");
+            return;
+          }
+        } catch (accessErr) {
+          if (accessErr?.response?.status === 403) {
+            setAccessError("You are not authorized to join this interview room.");
+          } else if (accessErr?.response?.status === 404) {
+            setAccessError("Interview not found");
+          } else {
+            setAccessError("Unable to verify room access right now. Please try again.");
+          }
+          setConnectionStatus("error");
+          return;
+        }
         
         // Connect to Socket.IO
         socketRef.current = io(getSocketServerUrl(), {
@@ -117,6 +178,15 @@ const Interview = () => {
 
         localStreamRef.current = stream;
         cameraTrackRef.current = stream.getVideoTracks()[0] || null;
+        
+        // Disable audio and video tracks initially (user must enable them)
+        stream.getAudioTracks().forEach((track) => {
+          track.enabled = false;
+        });
+        stream.getVideoTracks().forEach((track) => {
+          track.enabled = false;
+        });
+        
         setPermissionError(null);
 
         if (localVideoRef.current) {
@@ -155,7 +225,13 @@ const Interview = () => {
                 });
               } else {
                 console.error("[WebRTC] Failed to join room:", response.error);
+                setAccessError(response.error || "Failed to join interview room");
                 setConnectionStatus("error");
+                if (localStreamRef.current) {
+                  localStreamRef.current.getTracks().forEach((track) => track.stop());
+                  localStreamRef.current = null;
+                }
+                socketRef.current.disconnect();
               }
             }
           );
@@ -237,6 +313,16 @@ const Interview = () => {
             delete next[data.socketId];
             return next;
           });
+          setParticipantProfiles((prev) => {
+            const next = { ...prev };
+            delete next[data.socketId];
+            return next;
+          });
+          setParticipantCameraStatus((prev) => {
+            const next = { ...prev };
+            delete next[data.socketId];
+            return next;
+          });
         });
 
         socketRef.current.on("participant-screen-sharing", (data) => {
@@ -246,6 +332,14 @@ const Interview = () => {
           } else {
             console.log("[Interview] Remote participant stopped screen sharing");
           }
+        });
+
+        socketRef.current.on("participant-camera-toggled", (data) => {
+          console.log("[WebRTC] Participant camera toggled:", data.from, data.enabled);
+          setParticipantCameraStatus((prev) => ({
+            ...prev,
+            [data.from]: data.enabled,
+          }));
         });
 
         socketRef.current.on("disconnect", () => {
@@ -291,10 +385,35 @@ const Interview = () => {
     };
   }, [interviewId, profile?.clerk_user_id]);
 
+  const fetchParticipantProfile = async (clerkUserId, socketId) => {
+    try {
+      const response = await axiosInstance.get(`/api/users/profile/${clerkUserId}`);
+      if (response.data) {
+        setParticipantProfiles((prev) => ({
+          ...prev,
+          [socketId]: response.data,
+        }));
+      }
+    } catch (error) {
+      console.error("[Interview] Error fetching participant profile:", error);
+    }
+  };
+
   const createPeerConnection = async (socketId, clerkUserId, initiator) => {
     try {
       if (!socketId || socketId === socketRef.current?.id) return;
       if (peerConnectionsRef.current[socketId]) return peerConnectionsRef.current[socketId];
+
+      // Fetch participant profile
+      if (clerkUserId) {
+        fetchParticipantProfile(clerkUserId, socketId);
+      }
+
+      // Initialize camera status as true (on)
+      setParticipantCameraStatus((prev) => ({
+        ...prev,
+        [socketId]: true,
+      }));
 
       const peerConnection = new RTCPeerConnection({
         iceServers: STUN_SERVERS,
@@ -560,6 +679,47 @@ const Interview = () => {
     }
   };
 
+  // Format time remaining to display
+  const formatTime = (seconds) => {
+    const isNegative = seconds < 0;
+    const absSeconds = Math.abs(seconds);
+    const hours = Math.floor(absSeconds / 3600);
+    const minutes = Math.floor((absSeconds % 3600) / 60);
+    const secs = absSeconds % 60;
+    const formatted = `${hours.toString().padStart(2, "0")}:${minutes
+      .toString()
+      .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    return isNegative ? `-${formatted}` : formatted;
+  };
+
+  if (accessError) {
+    return (
+      <div className="relative min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
+        <div
+          className="absolute inset-0 bg-linear-to-br from-slate-900 via-slate-950 to-black"
+          aria-hidden
+        />
+        <div
+          className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.12),transparent_35%),radial-gradient(circle_at_80%_20%,rgba(16,185,129,0.1),transparent_35%),radial-gradient(circle_at_50%_80%,rgba(251,191,36,0.08),transparent_30%)]"
+          aria-hidden
+        />
+
+        <div className="relative z-10 max-w-md mx-auto px-6 text-center">
+          <div className="bg-slate-900/70 border border-white/10 rounded-lg p-6 mb-6">
+            <h2 className="text-xl font-semibold mb-3 text-slate-100">Room Unavailable</h2>
+            <p className="text-sm text-slate-300 mb-4">{accessError}</p>
+          </div>
+          <button
+            onClick={() => navigate("/")}
+            className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded-lg font-medium text-sm"
+          >
+            Back to dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Show permission error UI if media access failed
   if (permissionError) {
     return (
@@ -614,6 +774,22 @@ const Interview = () => {
 
       <main className="relative z-10 flex min-h-screen flex-col">
         <section className="flex-1 flex flex-col gap-4 px-4 py-6 sm:gap-6 sm:px-8 sm:py-10">
+          {/* Timer Display */}
+          <div className="flex justify-center mb-2">
+            <div
+              className={`px-4 py-2 rounded-lg font-mono text-lg font-bold ${
+                timeRemaining < 0
+                  ? "bg-red-900/40 border border-red-500/60 text-red-300"
+                  : timeRemaining < 300
+                  ? "bg-yellow-900/40 border border-yellow-500/60 text-yellow-300"
+                  : "bg-emerald-900/40 border border-emerald-500/60 text-emerald-300"
+              }`}
+            >
+              {formatTime(timeRemaining)}
+              {timeRemaining < 0 && <span className="ml-2 text-xs">OVERTIME</span>}
+            </div>
+          </div>
+
           <div className="flex flex-1 flex-col gap-4 sm:gap-6 md:flex-row">
             {/* Interviewer Video */}
             <div className="relative flex-1 overflow-hidden rounded-2xl border border-white/10 bg-slate-900/70 shadow-2xl shadow-slate-900/40">
@@ -624,12 +800,31 @@ const Interview = () => {
               <div className="relative flex h-full items-center justify-center p-4">
                 <div className="relative w-full rounded-xl border border-white/10 bg-black/60 p-3 aspect-video flex items-center justify-center text-slate-300 overflow-hidden">
                   {Object.values(remoteParticipants).length > 0 ? (
-                    <video
-                      ref={remoteVideoRef}
-                      autoPlay
-                      playsInline
-                      className="w-full h-full object-cover"
-                    />
+                    <>
+                      <video
+                        ref={remoteVideoRef}
+                        autoPlay
+                        playsInline
+                        className="w-full h-full object-cover"
+                      />
+                      {/* Show avatar overlay when camera is off */}
+                      {(() => {
+                        const remoteSocketId = Object.keys(remoteParticipants)[0];
+                        const cameraEnabled = participantCameraStatus[remoteSocketId] !== false;
+                        const profile = participantProfiles[remoteSocketId];
+                        return (
+                          !cameraEnabled && profile?.avatar_url && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+                              <img
+                                src={profile.avatar_url}
+                                alt={profile.display_name || "Participant"}
+                                className="w-40 h-40 rounded-full object-cover border-4 border-white/20"
+                              />
+                            </div>
+                          )
+                        );
+                      })()}
+                    </>
                   ) : (
                     <span className="text-sm">
                       {connectionStatus === "connecting"
@@ -675,6 +870,17 @@ const Interview = () => {
                     playsInline
                     className="w-full h-full object-cover"
                   />
+
+                  {/* Show avatar overlay when camera is off */}
+                  {!cameraOn && profile?.avatar_url && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+                      <img
+                        src={profile.avatar_url}
+                        alt={profile.display_name || "You"}
+                        className="w-40 h-40 rounded-full object-cover border-4 border-white/20"
+                      />
+                    </div>
+                  )}
 
                   {/* Signal strength */}
                   <div className="absolute left-3 top-3 flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-2 py-1 text-[11px] text-slate-200">

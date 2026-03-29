@@ -127,3 +127,30 @@ export const getPublicUserProfile = async (req, res) => {
     });
   }
 };
+
+/**
+ * Get user profile by clerk ID
+ * No authentication required (public endpoint for interviews)
+ */
+export const getUserProfileByClerkId = async (req, res) => {
+  try {
+    const { clerkUserId } = req.params;
+
+    if (!clerkUserId) {
+      return res.status(400).json({ error: "Clerk user ID is required" });
+    }
+
+    const profile = await usersService.getUserProfile(clerkUserId);
+
+    if (!profile) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    return res.status(200).json(profile);
+  } catch (error) {
+    console.error("Error in getUserProfileByClerkId:", error);
+    return res.status(500).json({
+      error: error.message || "Failed to fetch user profile",
+    });
+  }
+};

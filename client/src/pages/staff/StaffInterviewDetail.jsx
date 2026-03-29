@@ -17,6 +17,7 @@ const StaffInterviewDetail = () => {
   const [interview, setInterview] = useState(null);
   const [codeSubmissions, setCodeSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [accessDenied, setAccessDenied] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [formData, setFormData] = useState({
     feedback: '',
@@ -43,6 +44,9 @@ const StaffInterviewDetail = () => {
         setCodeSubmissions(submissionsRes.data);
       } catch (error) {
         console.error('Error fetching interview:', error);
+        if (error?.response?.status === 403) {
+          setAccessDenied(true);
+        }
       } finally {
         setLoading(false);
       }
@@ -98,7 +102,7 @@ const StaffInterviewDetail = () => {
       <div className="flex min-h-screen flex-col bg-slate-950 text-slate-50">
         <Header />
         <div className="flex-1 flex items-center justify-center">
-          <p className="text-red-400">Interview not found</p>
+          <p className="text-red-400">{accessDenied ? 'You are not allowed to access this interview.' : 'Interview not found'}</p>
         </div>
         <Footer />
       </div>
@@ -134,14 +138,22 @@ const StaffInterviewDetail = () => {
                 Candidate: <span className="font-medium text-cyan-400">{interview.candidate_clerk_id}</span>
               </p>
             </div>
-            {interview.status !== 'Completed' && !editMode && (
+            <div className="flex gap-3">
               <button
-                onClick={() => setEditMode(true)}
-                className="rounded-lg bg-cyan-500/20 px-4 py-2 text-cyan-400 transition hover:bg-cyan-500/30"
+                onClick={() => navigate(`/interview/${interviewId}`)}
+                className="rounded-lg bg-emerald-500 px-4 py-2 font-medium text-white transition hover:bg-emerald-600"
               >
-                Add Feedback
+                Join Interview
               </button>
-            )}
+              {interview.status !== 'Completed' && !editMode && (
+                <button
+                  onClick={() => setEditMode(true)}
+                  className="rounded-lg bg-cyan-500/20 px-4 py-2 text-cyan-400 transition hover:bg-cyan-500/30"
+                >
+                  Add Feedback
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="grid gap-8 lg:grid-cols-3">

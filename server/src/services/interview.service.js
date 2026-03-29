@@ -1,4 +1,5 @@
 import * as interviewsRepo from "../repositories/interviews.repo.js";
+import * as problemsRepo from "../repositories/problems.repo.js";
 
 const ALLOWED_STATUSES = ["Scheduled", "Ongoing", "Completed", "Cancelled"];
 
@@ -23,6 +24,44 @@ function asNullableValue(value) {
 		return null;
 	}
 	return value;
+}
+
+function isPastInterviewEnd(interview) {
+	if (!interview?.end_time) return false;
+	return Date.now() > new Date(interview.end_time).getTime();
+}
+
+function shouldAutoCompleteByTime(interview) {
+	if (!interview) return false;
+	if (interview.status !== "Scheduled" && interview.status !== "Ongoing") {
+		return false;
+	}
+	return isPastInterviewEnd(interview);
+}
+
+async function syncInterviewStatusByTime(interview) {
+	if (!shouldAutoCompleteByTime(interview)) {
+		return interview;
+	}
+
+	return interviewsRepo.updateInterviewById(interview.id, { status: "Completed" });
+}
+
+async function syncInterviewsStatusByTime(interviews = []) {
+	if (!Array.isArray(interviews) || interviews.length === 0) {
+		return [];
+	}
+
+	const updated = await Promise.all(
+		interviews.map(async (interview) => {
+			if (!shouldAutoCompleteByTime(interview)) {
+				return interview;
+			}
+			return interviewsRepo.updateInterviewById(interview.id, { status: "Completed" });
+		})
+	);
+
+	return updated;
 }
 
 function formatInterview(interview) {
@@ -106,13 +145,29 @@ export async function createInterview(clerkUserId, payload) {
 		throw err;
 	}
 
-	// Ensure candidate profile exists (create if necessary)
-	await interviewsRepo.createOrGetUserProfile(candidateClerkId);
+	// Validate candidate exists
+	const candidateProfile = await interviewsRepo.getUserProfileByClerkId(candidateClerkId);
+	if (!candidateProfile) {
+		const err = new Error("Candidate not found");
+		err.statusCode = 404;
+		throw err;
+	}
+
+	// Validate problem exists (if problem_id is provided)
+	const problemId = payload.problem_id?.trim();
+	if (problemId) {
+		const problem = await problemsRepo.getProblemById(problemId);
+		if (!problem) {
+			const err = new Error("Problem not found");
+			err.statusCode = 404;
+			throw err;
+		}
+	}
 
 	const interview = await interviewsRepo.createInterview({
 		candidate_clerk_id: candidateClerkId,
 		interviewer_clerk_id: clerkUserId,
-		problem_id: payload.problem_id || null,
+		problem_id: problemId || null,
 		room_id: roomId || `room_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
 		status: "Scheduled",
 		start_time: startDate.toISOString(),
@@ -134,9 +189,10 @@ export async function getInterviews(clerkUserId, query = {}) {
 		upcoming,
 		limit,
 	});
+	const syncedInterviews = await syncInterviewsStatusByTime(interviews);
 
-	console.log("[Service] Found interviews:", interviews.length);
-	return interviews.map(formatInterview);
+	console.log("[Service] Found interviews:", syncedInterviews.length);
+	return syncedInterviews.map(formatInterview);
 }
 
 export async function getInterviewById(interviewId, clerkUserId) {
@@ -154,7 +210,9 @@ export async function getInterviewById(interviewId, clerkUserId) {
 		throw err;
 	}
 
-	return formatInterview(interview);
+	const syncedInterview = await syncInterviewStatusByTime(interview);
+
+	return formatInterview(syncedInterview);
 }
 
 export async function updateInterview(interviewId, clerkUserId, updates = {}) {
@@ -201,6 +259,12 @@ export async function updateInterview(interviewId, clerkUserId, updates = {}) {
 		throw err;
 	}
 
+	if (payload.status === "Completed" && !isPastInterviewEnd(interview)) {
+		const err = new Error("Interview can be marked completed only after end_time");
+		err.statusCode = 400;
+		throw err;
+	}
+
 	const hasFeedbackFields =
 		payload.feedback !== undefined ||
 		payload.candidate_rating !== undefined ||
@@ -208,6 +272,11 @@ export async function updateInterview(interviewId, clerkUserId, updates = {}) {
 
 	// DB trigger allows feedback only for completed interviews.
 	if (hasFeedbackFields && !payload.status && interview.status !== "Completed") {
+		if (!isPastInterviewEnd(interview)) {
+			const err = new Error("Feedback can be added only after interview end_time");
+			err.statusCode = 400;
+			throw err;
+		}
 		payload.status = "Completed";
 	}
 

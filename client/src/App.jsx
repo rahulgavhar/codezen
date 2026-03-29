@@ -79,7 +79,7 @@ function App() {
         <Route path="/problems" element={<ProblemsPage />} />
         <Route
           path="/problem/:id"
-          element={isSignedIn && profile?.app_role !== 'staff' ? <ProblemDetail /> : <Navigate to="/" />}
+          element={isSignedIn ? <ProblemDetail /> : <Navigate to="/" />}
         />
         <Route
           path="/problem/:id/description"

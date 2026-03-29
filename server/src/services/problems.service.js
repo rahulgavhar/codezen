@@ -7,7 +7,7 @@ import * as problemsRepo from '../repositories/problems.repo.js';
  * @param {number} queryParams.limit - Items per page (default: 10, max: 100)
  * @param {string} queryParams.topics - Comma-separated tags to filter by
  * @param {string} queryParams.difficulties - Comma-separated difficulties to filter by
- * @param {string} queryParams.search - Search query for title/description
+ * @param {string} queryParams.search - Search query for title or problem ID
  * @returns {Promise<Object>} Formatted problems response
  */
 export async function getUserProblems(queryParams = {}) {

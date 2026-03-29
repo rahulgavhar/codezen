@@ -42,6 +42,16 @@ const AllInterviews = () => {
     return <Navigate to="/staff/interviews" />;
   }
 
+  const now = Date.now();
+  const completedInterviews = interviews.filter((interview) => {
+    const endedByTime = new Date(interview.end_time).getTime() < now;
+    return interview.status === "Completed" || interview.status === "Cancelled" || endedByTime;
+  });
+  const activeInterviews = interviews.filter((interview) => {
+    const endedByTime = new Date(interview.end_time).getTime() < now;
+    return !endedByTime && interview.status !== "Completed" && interview.status !== "Cancelled";
+  });
+
   return (
     <div className="flex min-h-screen flex-col bg-slate-950 text-slate-50">
       <Header />
@@ -71,38 +81,80 @@ const AllInterviews = () => {
               No interviews found. Once a staff interviewer schedules one using your user ID, it will appear here.
             </div>
           ) : (
-            <div className="divide-y divide-white/5">
-              {interviews.map((interview) => (
-                <article key={interview.id} className="p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-lg font-semibold text-slate-100">
-                        Interview with {interview.interviewer_clerk_id}
-                      </h2>
-                      <p className="text-sm text-slate-400">{interview.problem?.title || "General technical interview"}</p>
-                      <p className="mt-1 text-sm text-slate-300">
-                        {new Date(interview.start_time).toLocaleString()} - {new Date(interview.end_time).toLocaleString()}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">Room: {interview.room_id}</p>
-                    </div>
+            <div>
+              <div className="border-b border-white/5 px-5 py-3">
+                <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-200">Active interviews</h2>
+              </div>
+              {activeInterviews.length === 0 ? (
+                <div className="px-5 py-6 text-sm text-slate-400">No active interviews.</div>
+              ) : (
+                <div className="divide-y divide-white/5">
+                  {activeInterviews.map((interview) => (
+                    <article key={interview.id} className="p-5">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h2 className="text-lg font-semibold text-slate-100">
+                            Interview with {interview.interviewer_clerk_id}
+                          </h2>
+                          <p className="text-sm text-slate-400">{interview.problem?.title || "General technical interview"}</p>
+                          <p className="mt-1 text-sm text-slate-300">
+                            {new Date(interview.start_time).toLocaleString()} - {new Date(interview.end_time).toLocaleString()}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">Room: {interview.room_id}</p>
+                        </div>
 
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone[interview.status] || "text-slate-300 bg-slate-300/10 border-slate-300/30"}`}
-                      >
-                        {interview.status}
-                      </span>
+                        <div className="flex items-center gap-3">
+                          <span
+                            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone[interview.status] || "text-slate-300 bg-slate-300/10 border-slate-300/30"}`}
+                          >
+                            {interview.status}
+                          </span>
 
-                      <Link
-                        to={`/interview/${interview.id}`}
-                        className="rounded-lg bg-cyan-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-cyan-700"
-                      >
-                        Open
-                      </Link>
-                    </div>
-                  </div>
-                </article>
-              ))}
+                          <Link
+                            to={`/interview/${interview.id}`}
+                            className="rounded-lg bg-cyan-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-cyan-700"
+                          >
+                            Open
+                          </Link>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+
+              <div className="border-y border-white/5 px-5 py-3">
+                <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">Completed interviews</h2>
+              </div>
+              {completedInterviews.length === 0 ? (
+                <div className="px-5 py-6 text-sm text-slate-400">No completed interviews yet.</div>
+              ) : (
+                <div className="divide-y divide-white/5">
+                  {completedInterviews.map((interview) => (
+                    <article key={interview.id} className="p-5">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h2 className="text-lg font-semibold text-slate-100">
+                            Interview with {interview.interviewer_clerk_id}
+                          </h2>
+                          <p className="text-sm text-slate-400">{interview.problem?.title || "General technical interview"}</p>
+                          <p className="mt-1 text-sm text-slate-300">
+                            {new Date(interview.start_time).toLocaleString()} - {new Date(interview.end_time).toLocaleString()}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <span
+                            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone[interview.status] || "text-slate-300 bg-slate-300/10 border-slate-300/30"}`}
+                          >
+                            {interview.status}
+                          </span>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </section>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, Link, Navigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import Header from '../../components/Header';
@@ -13,7 +13,6 @@ const StaffScheduleInterview = () => {
   if (profile?.app_role !== 'staff') {
     return <Navigate to="/" />;
   }
-  const [problems, setProblems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [formData, setFormData] = useState({
@@ -23,20 +22,6 @@ const StaffScheduleInterview = () => {
     start_time: '',
     end_time: '',
   });
-
-  useEffect(() => {
-    // Fetch problems
-    const fetchData = async () => {
-      try {
-        const problemsRes = await axiosInstance.get('/api/problems?page=1&limit=100');
-        setProblems(problemsRes.data?.data || []);
-      } catch (error) {
-        console.error('Error fetching problems:', error);
-      }
-    };
-
-    fetchData();
-  }, []);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -142,7 +127,7 @@ const StaffScheduleInterview = () => {
                 <label className="block text-sm font-medium text-slate-300">Candidate ID *</label>
                 <input
                   type="text"
-                  placeholder="e.g., user_3BZL4z0thn"
+                  placeholder="e.g., user_3BZL4z0thnPCY5QbBPC0YSNeuNZ"
                   value={formData.candidate_clerk_id}
                   onChange={(e) => setFormData((prev) => ({
                     ...prev,
@@ -156,20 +141,16 @@ const StaffScheduleInterview = () => {
 
               {/* Problem (Optional) */}
               <div>
-                <label className="block text-sm font-medium text-slate-300">Problem (Optional)</label>
-                <select
+                <label className="block text-sm font-medium text-slate-300">Problem ID (Optional)</label>
+                <input
+                  type="text"
                   name="problem_id"
+                  placeholder="e.g., 15dfd731-54b7-47d5-bc1c-4c42c73d1285 or leave blank"
                   value={formData.problem_id}
                   onChange={handleInputChange}
-                  className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-slate-50 focus:border-cyan-400 focus:outline-none"
-                >
-                  <option value="">Select a problem...</option>
-                  {problems.map((problem) => (
-                    <option key={problem.id} value={problem.id}>
-                      {problem.title}
-                    </option>
-                  ))}
-                </select>
+                  className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-slate-50 placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
+                />
+                <p className="mt-1 text-xs text-slate-500">Enter the problem ID or leave blank to skip</p>
               </div>
 
               {/* Start Time */}
