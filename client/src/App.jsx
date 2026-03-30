@@ -118,7 +118,7 @@ function App() {
         />
         <Route
           path="/staff/profile"
-          element={isSignedIn && profile?.app_role === 'staff' ? <StaffProfile /> : <Navigate to="/" />}
+          element={isSignedIn && profile?.app_role === 'staff' ? <Navigate to={`/profile/${profile?.username}`} /> : <Navigate to="/" />}
         />
         <Route
           path="/staff/contests"

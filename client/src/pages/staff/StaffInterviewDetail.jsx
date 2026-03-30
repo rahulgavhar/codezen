@@ -158,6 +158,11 @@ const StaffInterviewDetail = () => {
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-950 text-slate-50">
+      <style>{`
+        .katex-html {
+          display: none !important;
+        }
+      `}</style>
       <Header />
 
       <div className="flex-1 px-4 py-8 sm:px-6 lg:px-8">
@@ -172,7 +177,7 @@ const StaffInterviewDetail = () => {
                 </span>
               </div>
               <p className="mt-1 text-slate-400">
-                Candidate: <span className="font-medium text-cyan-400">{interview.candidate_clerk_id}</span>
+                Candidate ID: <span className="font-medium text-cyan-400">{interview.candidate_clerk_id}</span>
               </p>
             </div>
             <div className="flex gap-3">

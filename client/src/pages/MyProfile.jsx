@@ -31,6 +31,7 @@ const MyProfile = () => {
 
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({});
+  const [isCopied, setIsCopied] = useState(false);
 
   // Redirect if not signed in
   useEffect(() => {
@@ -43,7 +44,7 @@ const MyProfile = () => {
   useEffect(() => {
     if (profile) {
       setEditData({
-        username: profile.username || '',
+        username: user?.id || '',
         display_name: profile.display_name || '',
         bio: profile.bio || '',
         avatar_url: profile.avatar_url || '',
@@ -65,6 +66,16 @@ const MyProfile = () => {
       refetchUserData();
     } catch (error) {
       console.error('Error updating profile:', error);
+    }
+  };
+
+  const handleCopyClerkId = async () => {
+    try {
+      await navigator.clipboard.writeText(user?.id);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
     }
   };
 
@@ -279,9 +290,27 @@ const MyProfile = () => {
                       <h1 className="text-5xl font-black mb-2 text-slate-50">
                         {displayData.display_name}
                       </h1>
-                      <p className="text-2xl font-semibold mb-1" style={{ color: 'var(--color-accent)' }}>
-                        @{displayData.username}
-                      </p>
+                      <div className="flex items-center gap-1 mb-1 justify-center lg:justify-start">
+                        <p className="text-2xl font-semibold" style={{ color: 'var(--color-accent)' }}>
+                          @{user?.id}
+                        </p>
+                        <button
+                          onClick={handleCopyClerkId}
+                          className="inline-flex items-center justify-center p-1 rounded hover:bg-white/10 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-950 shrink-0"
+                          style={{ '--tw-ring-color': 'var(--color-accent)' }}
+                          title={`Copy user ID: ${user?.id}`}
+                        >
+                          {!isCopied ? (
+                            <svg className="w-5 h-5" style={{ color: 'var(--color-accent)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                          ) : (
+                            <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
                       <p className="text-slate-400 text-lg max-w-2xl mb-2">
                         {displayData.bio}
                       </p>

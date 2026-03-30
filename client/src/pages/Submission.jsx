@@ -130,11 +130,11 @@ const Submission = () => {
                   <div className="rounded-xl border border-white/10 bg-white/5 p-4">
                     <p className="text-lg font-semibold text-slate-50">{submission.problem?.title || '<Unknown Problem>'}</p>
                     <p className="text-sm text-slate-400">{submission.problem?.difficulty || '—'}</p>
-                    <p className="text-xs text-slate-500 mt-1">Slug: {submission.problem?.slug || '—'}</p>
                     {submission.problem?.description && (
-                      <p className="text-sm text-slate-300 mt-3 line-clamp-4">
-                        {submission.problem.description}
-                      </p>
+                      <div className="text-sm text-slate-300 mt-3 line-clamp-4 prose prose-invert max-w-none" style={{ color: 'inherit' }}>
+                        <style>{'.katex-html { display: none !important; }'}</style>
+                        <div dangerouslySetInnerHTML={{ __html: submission.problem.description }} />
+                      </div>
                     )}
                   </div>
                 </div>
@@ -144,17 +144,6 @@ const Submission = () => {
                     <h3 className="text-sm font-semibold text-rose-300">Error</h3>
                     <pre className="rounded-lg bg-rose-950/50 border border-rose-400/20 p-3 text-sm text-rose-200 whitespace-pre-wrap">
                       {submission.error_message}
-                    </pre>
-                  </div>
-                )}
-
-                {submission.test_results && (
-                  <div className="space-y-2">
-                    <h3 className="text-sm font-semibold text-slate-200">Test Results</h3>
-                    <pre className="rounded-lg bg-slate-950/60 border border-white/10 p-3 text-sm text-slate-200 overflow-auto">
-                      {typeof submission.test_results === 'string'
-                        ? submission.test_results
-                        : JSON.stringify(submission.test_results, null, 2)}
                     </pre>
                   </div>
                 )}

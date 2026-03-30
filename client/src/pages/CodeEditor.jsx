@@ -587,15 +587,6 @@ class Main {
           <div className="flex-1 overflow-y-auto p-6">
             {activeTab === "description" && (
               <div className="space-y-6">
-                <div>
-                  <h1 className="mb-3 text-2xl font-bold">{problemData.title}</h1>
-                  <div className="flex items-center gap-3">
-                    <span className="rounded-full border border-emerald-400/30 bg-emerald-400/15 px-3 py-1 text-xs font-semibold text-emerald-200">
-                      {problemData.difficulty || "Easy"}
-                    </span>
-                  </div>
-                </div>
-
                 {/* Show ONLY transformed description - no original, no AI label */}
                 {problemData.gemini_description ? (
                   <div className="space-y-3 text-sm text-slate-300 prose prose-invert max-w-none" style={{ color: 'inherit' }}>

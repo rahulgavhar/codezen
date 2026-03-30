@@ -140,6 +140,8 @@ const Interview = () => {
           setInterviewData({
             start_time: interview.start_time,
             end_time: interview.end_time,
+            interviewer_company_name: interview.interviewer_company_name || null,
+            room_id: interview.room_id || null,
           });
 
           // Fetch interview problem data for the code editor
@@ -1047,7 +1049,7 @@ const Interview = () => {
           {/* Timer Display */}
           <div className="flex justify-center mb-2">
             <div
-              className={`px-4 py-2 rounded-lg font-mono text-lg font-bold ${
+              className={`px-4 rounded-lg font-mono text-lg font-bold ${
                 timeRemaining < 0
                   ? "bg-red-900/40 border border-red-500/60 text-red-300"
                   : timeRemaining < 300
@@ -1061,7 +1063,7 @@ const Interview = () => {
           </div>
 
           {/* Interview Details Panel */}
-          <div className="flex justify-center mb-4">
+          <div className="flex justify-center">
             <div className="inline-flex items-center gap-6 rounded-lg border border-white/10 bg-slate-900/60 backdro-blur px-6 py-3 text-sm">
               {interviewData?.interviewer_company_name && (
                 <div className="flex items-center gap-2">
@@ -1076,14 +1078,6 @@ const Interview = () => {
                   <span className="text-slate-400">🔑</span>
                   <span className="font-mono text-xs text-slate-300">
                     {interviewData.room_id.substring(0, 16)}...
-                  </span>
-                </div>
-              )}
-              {problemData?.title && (
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-400">❓</span>
-                  <span className="font-medium text-slate-200 truncate max-w-xs">
-                    {problemData.title}
                   </span>
                 </div>
               )}
@@ -1227,7 +1221,7 @@ const Interview = () => {
         {showCode && (
           <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-sm px-3 py-6 sm:px-6">
             <div className="relative h-full w-[94vw] max-w-8xl max-h-[96vh] overflow-hidden rounded-2xl border border-cyan-400/40 bg-slate-950 shadow-2xl shadow-cyan-900/40">
-              <div className="h-full overflow-hidden">
+              <div className="h-full overflow-auto flex flex-col">
                 <CodeEditor 
                   onClose={() => setShowCode(false)} 
                   problemData={problemData}

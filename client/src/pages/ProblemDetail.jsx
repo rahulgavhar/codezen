@@ -61,6 +61,7 @@ class Main {
   const [selectedSampleIndex, setSelectedSampleIndex] = useState(0);
   const [splitPosition, setSplitPosition] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
 
   const languageMap = {
     javascript: "javascript",
@@ -145,6 +146,16 @@ class Main {
 
   const handleReset = () => {
     setCode(boilerplates[language]);
+  };
+
+  const handleCopyProblemId = async () => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
   };
 
   const handleMouseDown = () => {
@@ -547,8 +558,28 @@ class Main {
           <span className="text-sm font-semibold">Codezen</span>
           <div className="h-4 border-l border-white/20"></div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400">ProblemId: </span>
-            <span className="font-mono text-sm font-bold text-cyan-300">{id}</span>
+            <span className="text-xs text-slate-400">Problem Id: </span>
+            <button 
+              onClick={handleCopyProblemId}
+              className="flex items-center gap-1 px-2 py-1 rounded border border-slate-600 bg-slate-700 hover:bg-slate-600 hover:text-slate-100 text-slate-300 transition text-xs font-medium"
+              title="Copy problem ID"
+            >
+              {!isCopied ? (
+                <>
+                  <svg className="w-3 h-3" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24">
+                    <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 4h3a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3m0 3h6m-6 5h6m-6 4h6M10 3v4h4V3h-4Z"/>
+                  </svg>
+                  <span className="font-mono text-sm font-bold text-cyan-300">{id}</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-3 h-3 text-emerald-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24">
+                    <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 4h3a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3m0 3h6m-6 7 2 2 4-4m-5-9v4h4V3h-4Z"/>
+                  </svg>
+                  <span className="text-emerald-400">Copied!</span>
+                </>
+              )}
+            </button>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -647,7 +678,7 @@ class Main {
             {activeTab === "description" && (
               <div className="space-y-6">
                 <div>
-                  <h1 className="mb-3 text-2xl font-bold">{problem.title}</h1>
+                  <h1 className="text-2xl font-bold mb-3">{problem.title}</h1>
                   <div className="flex items-center gap-3">
                     <span
                       className={`rounded-full border px-3 py-1 text-xs font-semibold ${

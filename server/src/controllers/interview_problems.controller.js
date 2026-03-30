@@ -143,13 +143,14 @@ export const transformProblemDescription = async (req, res) => {
     }
 
     // Call Groq LLM to transform the description
-    const prompt = `Make this Problem Description story-like and engaging while keeping all details, HTML Structure and katex formulas intact.\n
-    
-    Problem Description:\n\n${problemData.description}. 
+    const prompt = `Make this Problem Description story-like and engaging while keeping all details, HTML Structure and katex tags intact.\n
+    You can use characters Alice and/or Bob only if needed, to make it more engaging story.\n
+
+    Original Problem Description:\n\n${problemData.description}. 
     
     \nNo HTML tags should be changed.
-    \nKeep complex tags like <pre>, <code>, <katex> intact without any modifications. Just make the content more story-like and engaging.
-    \nJust make changes to the inner text, but STRICTLY keep all formatting, details and tags intact.`;
+    \nKeep complex tags like <pre>, <code>, <katex> intact without any modifications. Just make their inner text content more story-like and engaging.
+    \nJust make changes to the inner text, and STRICTLY keep all formatting, details and tags intact(unchanged).`;
 
     console.log("[Interview] Calling Groq LLM to transform problem description");
     const transformedDescription = await callGroqLLM(prompt, {

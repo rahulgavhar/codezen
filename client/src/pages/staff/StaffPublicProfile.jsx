@@ -5,30 +5,46 @@ import Footer from '../../components/Footer';
 import axiosInstance from '../../lib/axios';
 
 const StaffPublicProfile = () => {
-  const { staffId } = useParams();
+  const { staffId, username } = useParams();
   const [staffProfile, setStaffProfile] = useState(null);
   const [contests, setContests] = useState([]);
   const [interviews, setInterviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [isCopied, setIsCopied] = useState(false);
+  const [resolvedStaffId, setResolvedStaffId] = useState(null);
 
   useEffect(() => {
     const fetchStaffData = async () => {
       try {
         setLoading(true);
+        let staffIdToUse = staffId;
 
-        // Fetch user profile
-        const profileRes = await axiosInstance.get(`/api/users/${staffId}/profile`);
-        setStaffProfile(profileRes.data);
+        // If username is provided (from /profile/:username route), fetch profile first
+        if (username && !staffId) {
+          const profileRes = await axiosInstance.get(`/api/users/public/${username}`);
+          staffIdToUse = profileRes.data.clerk_user_id;
+          setStaffProfile(profileRes.data);
+          setResolvedStaffId(staffIdToUse);
+        } else if (staffId) {
+          // If staffId is provided (from /staff/:staffId route)
+          const profileRes = await axiosInstance.get(`/api/users/${staffId}/profile`);
+          setStaffProfile(profileRes.data);
+          setResolvedStaffId(staffId);
+        }
 
-        // Fetch contests created by this staff
-        const contestsRes = await axiosInstance.get('/api/contests');
-        const staffContests = contestsRes.data.filter(c => c.created_by === staffId);
-        setContests(staffContests);
+        if (!staffIdToUse) {
+          throw new Error('Unable to resolve staff ID');
+        }
+
+        // TODO: Fetch contests created by this staff (endpoint not yet implemented)
+        // const contestsRes = await axiosInstance.get('/api/contests');
+        // const staffContests = contestsRes.data.filter(c => c.created_by === staffIdToUse);
+        // setContests(staffContests);
 
         // Fetch interviews where this staff is interviewer
         const interviewsRes = await axiosInstance.get('/api/interviews');
-        const staffInterviews = interviewsRes.data.filter(i => i.interviewer_clerk_id === staffId);
+        const staffInterviews = interviewsRes.data.filter(i => i.interviewer_clerk_id === staffIdToUse);
         setInterviews(staffInterviews);
       } catch (err) {
         setError('Failed to load staff profile');
@@ -38,10 +54,10 @@ const StaffPublicProfile = () => {
       }
     };
 
-    if (staffId) {
+    if (staffId || username) {
       fetchStaffData();
     }
-  }, [staffId]);
+  }, [staffId, username]);
 
   if (loading) {
     return (
@@ -94,6 +110,21 @@ const StaffPublicProfile = () => {
     });
   };
 
+  const handleCopyStaffId = async () => {
+    try {
+      const idToCopy = resolvedStaffId || staffProfile?.clerk_user_id;
+      if (!idToCopy) {
+        console.error('No staff ID available to copy');
+        return;
+      }
+      await navigator.clipboard.writeText(idToCopy);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
   return (
     <div className="flex min-h-screen flex-col bg-slate-950 text-slate-50">
       <Header />
@@ -112,7 +143,24 @@ const StaffPublicProfile = () => {
 
               {/* Info */}
               <div className="flex-1 text-center sm:text-left">
-                <h1 className="text-3xl font-bold">{staffProfile.display_name}</h1>
+                <div className="flex items-center gap-1 justify-center sm:justify-start">
+                  <h1 className="text-3xl font-bold">{staffProfile.display_name}</h1>
+                  <button
+                    onClick={handleCopyStaffId}
+                    className="inline-flex items-center justify-center p-1 rounded hover:bg-white/10 transition focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-slate-950 shrink-0"
+                    title={`Copy user ID: ${resolvedStaffId || staffId}`}
+                  >
+                    {!isCopied ? (
+                      <svg className="w-5 h-5 text-slate-400 hover:text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
                 {staffProfile.company_name && (
                   <p className="mt-1 text-lg font-medium text-emerald-400">@{staffProfile.company_name}</p>
                 )}
@@ -120,17 +168,12 @@ const StaffPublicProfile = () => {
                 <p className="mt-1 text-xs text-slate-500">
                   Member since {new Date(staffProfile.created_at).toLocaleDateString()}
                 </p>
-
-                {/* Action Button */}
-                <button className="mt-4 rounded-lg bg-cyan-500 px-6 py-2 font-medium text-white transition hover:bg-cyan-600">
-                  Schedule Interview
-                </button>
               </div>
             </div>
           </div>
 
-          {/* Contests Section */}
-          <div className="mb-8 rounded-lg border border-white/10 bg-white/5 p-6 backdrop-blur">
+          {/* Contests Section - Hidden until API endpoint is implemented */}
+          {/* <div className="mb-8 rounded-lg border border-white/10 bg-white/5 p-6 backdrop-blur">
             <h2 className="mb-4 text-lg font-bold">Contests Created ({contests.length})</h2>
             {contests.length === 0 ? (
               <p className="text-slate-400">No contests created</p>
@@ -169,7 +212,7 @@ const StaffPublicProfile = () => {
                 })}
               </div>
             )}
-          </div>
+          </div> */}
 
           {/* Upcoming Interviews */}
           {upcomingInterviews.length > 0 && (
@@ -194,34 +237,30 @@ const StaffPublicProfile = () => {
           {/* Completed Interviews & Experience */}
           <div className="mb-8 rounded-lg border border-white/10 bg-white/5 p-6 backdrop-blur">
             <h2 className="mb-4 text-lg font-bold">Experience</h2>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-1">
               <div className="rounded-lg border border-white/10 bg-white/5 p-4">
                 <p className="text-sm text-slate-400">Interviews Conducted</p>
                 <p className="mt-2 text-3xl font-bold text-emerald-400">{completedInterviews.length}</p>
                 <p className="mt-1 text-xs text-slate-500">Completed interviews</p>
               </div>
-              <div className="rounded-lg border border-white/10 bg-white/5 p-4">
+              {/* Contests section hidden until API endpoint is implemented */}
+              {/* <div className="rounded-lg border border-white/10 bg-white/5 p-4">
                 <p className="text-sm text-slate-400">Contests Created</p>
                 <p className="mt-2 text-3xl font-bold text-cyan-400">{contests.length}</p>
                 <p className="mt-1 text-xs text-slate-500">Total contests</p>
-              </div>
+              </div> */}
             </div>
           </div>
 
           {/* Availability Section */}
-          <div className="rounded-lg border border-white/10 bg-white/5 p-6 backdrop-blur">
-            <h2 className="mb-4 text-lg font-bold">Availability</h2>
-            {upcomingInterviews.length > 0 ? (
-              <div className="mb-4 text-sm text-slate-400">
+          {upcomingInterviews.length > 0 && (
+            <div className="rounded-lg border border-white/10 bg-white/5 p-6 backdrop-blur">
+              <h2 className="mb-4 text-lg font-bold">Availability</h2>
+              <div className="text-sm text-slate-400">
                 <p>{upcomingInterviews.length} interview slot(s) available</p>
               </div>
-            ) : (
-              <p className="mb-4 text-sm text-slate-400">Currently no available slots</p>
-            )}
-            <button className="w-full rounded-lg bg-cyan-500 px-4 py-3 font-medium text-white transition hover:bg-cyan-600">
-              Schedule Interview
-            </button>
-          </div>
+            </div>
+          )}
         </div>
       </div>
 

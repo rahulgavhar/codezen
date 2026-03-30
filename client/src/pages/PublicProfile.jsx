@@ -19,6 +19,7 @@ const PublicProfile = () => {
   const [ratingData, setRatingData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
 
   useEffect(() => {
     fetchUserData();
@@ -35,6 +36,7 @@ const PublicProfile = () => {
 
       setUserData({
         username: profile.username,
+        clerkUserId: profile.clerk_user_id,
         fullName: profile.display_name,
         avatar: profile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile.username}`,
         bio: profile.bio || 'No bio yet',
@@ -73,6 +75,16 @@ const PublicProfile = () => {
     if (rating >= 1800) return 'Specialist';
     if (rating >= 1600) return 'Apprentice';
     return 'Novice';
+  };
+
+  const handleCopyUsername = async () => {
+    try {
+      await navigator.clipboard.writeText(userData.clerkUserId || userData.username);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 500);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
   };
 
   if (notFound) {
@@ -166,9 +178,27 @@ const PublicProfile = () => {
                     <h1 className="text-5xl font-black mb-2 bg-linear-to-r from-base-content to-base-content/70 bg-clip-text text-transparent">
                       {userData.fullName}
                     </h1>
-                    <p className="text-2xl font-semibold mb-1" style={{ color: 'var(--color-accent)' }}>
-                      @{userData.username}
-                    </p>
+                    <div className="flex items-center gap-1 mb-1">
+                      <p className="text-xl font-semibold" style={{ color: 'var(--color-accent)' }}>
+                        @{userData.clerkUserId}
+                      </p>
+                      <button
+                        onClick={handleCopyUsername}
+                        className="inline-flex items-center justify-center p-1 rounded hover:bg-white/10 transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 shrink-0"
+                        style={{ '--tw-ring-color': 'var(--color-accent)' }}
+                        title={`Copy user ID: ${userData.clerkUserId}`}
+                      >
+                        {!isCopied ? (
+                          <svg className="w-5 h-5" style={{ color: 'var(--color-accent)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
                     <p className="text-base-content/60 text-lg max-w-2xl">
                       {userData.bio}
                     </p>
