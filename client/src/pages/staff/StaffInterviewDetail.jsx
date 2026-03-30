@@ -219,8 +219,12 @@ const StaffInterviewDetail = () => {
                   {/* Original Description */}
                   <div className="mb-4">
                     <h3 className="text-sm font-medium text-slate-300">Original Description</h3>
-                    <div className="mt-1 rounded border border-slate-700 bg-slate-800/50 p-3 text-slate-50 max-h-48 overflow-y-auto">
-                      {problemData.description || 'No description provided'}
+                    <div className="mt-1 rounded border border-slate-700 bg-slate-800/50 p-3 text-slate-50 max-h-48 overflow-y-auto prose prose-invert max-w-none" style={{ color: 'inherit' }}>
+                      {problemData.description ? (
+                        <div dangerouslySetInnerHTML={{ __html: problemData.description }} />
+                      ) : (
+                        'No description provided'
+                      )}
                     </div>
                   </div>
 
@@ -228,8 +232,8 @@ const StaffInterviewDetail = () => {
                   {problemData.gemini_description && (
                     <div className="mb-4">
                       <h3 className="text-sm font-medium text-amber-400">✨ AI-Transformed Description</h3>
-                      <div className="mt-1 rounded border border-amber-500/30 bg-amber-500/10 p-3 text-slate-50 max-h-48 overflow-y-auto">
-                        {problemData.gemini_description}
+                      <div className="mt-1 rounded border border-amber-500/30 bg-amber-500/10 p-3 text-slate-50 max-h-48 overflow-y-auto prose prose-invert max-w-none" style={{ color: 'inherit' }}>
+                        <div dangerouslySetInnerHTML={{ __html: problemData.gemini_description }} />
                       </div>
                     </div>
                   )}

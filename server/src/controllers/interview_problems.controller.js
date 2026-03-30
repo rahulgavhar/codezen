@@ -1,5 +1,6 @@
 import { supabase } from "../config/supabase.client.js";
 import { ENV } from "../config/env.config.js";
+import { callGroqLLM } from "../config/groq.client.js";
 
 /**
  * Get interview problems by interview ID
@@ -106,12 +107,12 @@ export const updateInterviewProblem = async (req, res) => {
 };
 
 /**
- * Transform problem description to story-type using Gemini API
+ * Transform problem description to story-type using Groq LLM
  */
 export const transformProblemDescription = async (req, res) => {
   try {
-    if (!ENV.GEMINI_API_KEY) {
-      return res.status(400).json({ error: "Gemini API key not configured" });
+    if (!ENV.GROQ_API_KEY) {
+      return res.status(400).json({ error: "Groq API key not configured" });
     }
 
     const { interviewId } = req.params;
@@ -131,44 +132,31 @@ export const transformProblemDescription = async (req, res) => {
       return res.status(400).json({ error: "Problem has no description to transform" });
     }
 
-    // Call Gemini API to transform the description
-    const prompt = `Transform this problem description into a story-type format. Keep all technical details, constraints, and requirements exactly the same. Make it more engaging and narrative-driven:\n\n${problemData.description}`;
-
-    const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${ENV.GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: prompt,
-                },
-              ],
-            },
-          ],
-        }),
-      }
-    );
-
-    if (!geminiResponse.ok) {
-      const errorData = await geminiResponse.json();
-      console.error("Gemini API error:", errorData);
-      return res.status(500).json({ error: "Failed to transform description with Gemini" });
+    // Skip if already transformed
+    if (problemData.gemini_description) {
+      return res.json({
+        success: true,
+        message: "Problem already transformed",
+        gemini_description: problemData.gemini_description,
+        problem: problemData,
+      });
     }
 
-    const geminiData = await geminiResponse.json();
-    const transformedDescription = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+    // Call Groq LLM to transform the description
+    const prompt = `Make this story-like and engaging while keeping all details and katex formulas intact. Return as HTML with <p>, <h3>, and <katex-html> tags:\n\n${problemData.description}. All tags should be as-is and not transformed. Just transform the inner text to be more story-like and engaging, but keep all formatting, details, and tags intact.`;
+
+    console.log("[Interview] Calling Groq LLM to transform problem description");
+    const transformedDescription = await callGroqLLM(prompt, {
+      model: "openai/gpt-oss-120b",
+      temperature: 0.7,
+      maxTokens: 2048,
+    });
 
     if (!transformedDescription) {
-      return res.status(500).json({ error: "No response from Gemini API" });
+      return res.status(500).json({ error: "No response from Groq API" });
     }
 
-    // Update the interview_problem with gemini_description
+    // Update the interview_problem with transformed description
     const { data: updatedProblem, error: updateError } = await supabase
       .from("interview_problems")
       .update({
@@ -189,7 +177,7 @@ export const transformProblemDescription = async (req, res) => {
       problem: updatedProblem,
     });
   } catch (err) {
-    console.error("Error transforming problem description:", err);
+    console.error("[Interview] Error transforming problem description:", err);
     res.status(500).json({ error: "Failed to transform problem description" });
   }
 };

@@ -174,6 +174,31 @@ export async function createInterview(clerkUserId, payload) {
 		end_time: endDate.toISOString(),
 	});
 
+	// If a problem is provided, create an interview_problems record with the problem snapshot
+	if (interview.id && problemId) {
+		try {
+			const problem = await problemsRepo.getProblemById(problemId);
+			if (problem) {
+				await interviewsRepo.createInterviewProblem({
+					interview_id: interview.id,
+					problem_id: problemId,
+					title: problem.title,
+					description: problem.description,
+					input_format: problem.input_format,
+					output_format: problem.output_format,
+					constraints: problem.constraints,
+					hints: problem.hints,
+					difficulty: problem.difficulty,
+					time_limit_ms: problem.time_limit_ms,
+					memory_limit_mb: problem.memory_limit_mb,
+				});
+			}
+		} catch (err) {
+			console.warn("[Service] Could not create interview_problem record:", err.message);
+			// Don't fail the interview creation if interview_problems fails
+		}
+	}
+
 	return formatInterview(interview);
 }
 

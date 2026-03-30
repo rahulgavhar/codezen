@@ -197,3 +197,31 @@ export async function getInterviewCodeSubmissions(interviewId) {
 
 	return data || [];
 }
+
+export async function createInterviewProblem(payload) {
+	ensureSupabaseConfigured();
+
+	const { data, error } = await supabase
+		.from("interview_problems")
+		.insert({
+			interview_id: payload.interview_id,
+			problem_id: payload.problem_id,
+			title: payload.title,
+			description: payload.description,
+			input_format: payload.input_format,
+			output_format: payload.output_format,
+			constraints: payload.constraints,
+			hints: payload.hints,
+			difficulty: payload.difficulty,
+			time_limit_ms: payload.time_limit_ms,
+			memory_limit_mb: payload.memory_limit_mb,
+		})
+		.select()
+		.single();
+
+	if (error) {
+		throw error;
+	}
+
+	return data;
+}

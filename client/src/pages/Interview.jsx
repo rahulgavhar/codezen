@@ -4,6 +4,7 @@ import { useSelector } from "react-redux";
 import { io } from "socket.io-client";
 import axiosInstance from "../lib/axios";
 import CodeEditor from "./CodeEditor";
+import SharedScreen from "./SharedScreen";
 import { LuCodeXml, LuScreenShareOff } from "react-icons/lu";
 import { FaMicrophone, FaMicrophoneSlash } from "react-icons/fa";
 import { FaVideo, FaVideoSlash } from "react-icons/fa6";
@@ -25,6 +26,8 @@ const getSocketServerUrl = () => {
   }
 };
 
+
+
 const Interview = () => {
   const navigate = useNavigate();
   const { interviewId: interviewIdParam, id } = useParams();
@@ -36,6 +39,9 @@ const Interview = () => {
   const [screenOn, setScreenOn] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
   const [showCode, setShowCode] = useState(false);
+  const [showRemoteScreen, setShowRemoteScreen] = useState(false);
+  const [remoteScreenStream, setRemoteScreenStream] = useState(null);
+  const [remoteParticipantScreenSharing, setRemoteParticipantScreenSharing] = useState({});
   const [interviewerSignal, setInterviewerSignal] = useState(0);
   const [mySignal, setMySignal] = useState(0);
   const [connectionStatus, setConnectionStatus] = useState("connecting");
@@ -51,12 +57,14 @@ const Interview = () => {
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const remoteScreenVideoRef = useRef(null);
   const localStreamRef = useRef(null);
   const screenStreamRef = useRef(null);
   const cameraTrackRef = useRef(null);
   const peerConnectionsRef = useRef({});
   const pendingIceCandidatesRef = useRef({});
   const socketRef = useRef(null);
+  const remoteScreenSharingRef = useRef({});  // Track screen sharing status reliably
 
   // Keep the left panel (remote video) reliably bound even if ontrack fires
   // before the video element is mounted in the DOM.
@@ -71,6 +79,22 @@ const Interview = () => {
       }
     }
   }, [remoteParticipants]);
+
+  // Keep the screen video element in sync with the stream state
+  // This ensures that when the overlay is reopened, the stream is properly connected
+  useEffect(() => {
+    if (remoteScreenVideoRef.current && remoteScreenStream) {
+      console.log("[Interview] Syncing screen video to stream");
+      remoteScreenVideoRef.current.srcObject = remoteScreenStream;
+      
+      // Try to play when overlay becomes visible
+      if (showRemoteScreen) {
+        console.log("[Interview] Overlay opened, attempting autoplay");
+        remoteScreenVideoRef.current.play()
+          .catch((err) => console.warn("[Interview] Screen autoplay failed:", err?.message || err));
+      }
+    }
+  }, [remoteScreenStream, showRemoteScreen]);
 
   // Timer: Update remaining time every second
   useEffect(() => {
@@ -120,10 +144,21 @@ const Interview = () => {
 
           // Fetch interview problem data for the code editor
           try {
+            console.log("[Interview] Fetching problem data for interview:", interviewId);
             const problemRes = await axiosInstance.get(`/api/interview-problems/${interviewId}`);
-            setProblemData(problemRes.data);
+            console.log("[Interview] Problem data fetched:", problemRes.data);
+            if (problemRes.data) {
+              setProblemData(problemRes.data);
+              console.log("[Interview] Problem data set successfully");
+            } else {
+              console.warn("[Interview] Problem data response is empty");
+            }
           } catch (problemErr) {
-            console.warn("[Interview] Could not load problem data:", problemErr?.message);
+            console.error("[Interview] Error fetching problem data:", {
+              status: problemErr?.response?.status,
+              message: problemErr?.message,
+              data: problemErr?.response?.data,
+            });
             // Don't block interview if problem data isn't available
           }
 
@@ -154,46 +189,30 @@ const Interview = () => {
           reconnectionAttempts: 5,
         });
 
-        // Get local media stream (audio only initially to avoid camera light)
-        console.log("[Interview] Requesting audio permissions...");
+        // Get local media stream - no audio initially to avoid microphone 'in use' indicator
+        console.log("[Interview] Creating empty media stream...");
         let stream;
         try {
-          // Request ONLY audio initially - video will be requested when user enables camera
-          // This prevents the camera light from turning on unnecessarily
-          stream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true },
-          });
+          // Create empty stream first (no audio, no video)
+          // Audio will be requested only when user clicks mic button
+          // This prevents the microphone 'in use' indicator from showing unnecessarily
+          stream = new MediaStream();
 
           // In React StrictMode dev, effect can run twice. If this invocation was
-          // already cleaned up, immediately release devices to avoid camera LED leaks.
+          // already cleaned up, nothing to clean up from empty stream.
           if (isDisposed) {
-            stream.getTracks().forEach((track) => track.stop());
             return;
           }
 
-          console.log("[Interview] Audio stream acquired:", stream.getTracks());
+          console.log("[Interview] Empty media stream created");
         } catch (mediaErr) {
-          console.error("[Interview] getUserMedia error:", mediaErr.name, mediaErr.message);
-          if (mediaErr.name === "NotAllowedError") {
-            setPermissionError("Microphone permission denied. Please enable it in browser settings.");
-            setMediaError("permission-denied");
-          } else if (mediaErr.name === "NotFoundError") {
-            setMediaError("no-device");
-            setPermissionError("No microphone found on this device.");
-          } else {
-            setMediaError("unknown");
-            setPermissionError(`Media error: ${mediaErr.message}`);
-          }
+          console.error("[Interview] Stream creation error:", mediaErr.message);
+          setPermissionError(`Media error: ${mediaErr.message}`);
           throw mediaErr;
         }
 
         localStreamRef.current = stream;
         cameraTrackRef.current = null; // No camera track initially
-        
-        // Disable audio track initially (user must enable it)
-        stream.getAudioTracks().forEach((track) => {
-          track.enabled = false;
-        });
         
         setPermissionError(null);
 
@@ -334,11 +353,34 @@ const Interview = () => {
         });
 
         socketRef.current.on("participant-screen-sharing", (data) => {
-          console.log("[WebRTC] Screen sharing status:", data);
+          console.log("[WebRTC] Screen sharing status event:", data);
+          console.log("[WebRTC] Event data keys:", Object.keys(data));
+          
+          // Try multiple ways to get socketId
+          const participantSocketId = data.socketId || data.from || Object.keys(peerConnectionsRef.current)[0];
+          console.log("[WebRTC] Resolved socketId:", participantSocketId);
+          
+          if (participantSocketId) {
+            // Update ref synchronously for immediate use in ontrack
+            remoteScreenSharingRef.current[participantSocketId] = data.sharing;
+            console.log("[WebRTC] Updated remoteScreenSharingRef:", remoteScreenSharingRef.current);
+            
+            setRemoteParticipantScreenSharing((prev) => ({
+              ...prev,
+              [participantSocketId]: data.sharing,
+            }));
+          }
+          
           if (data.sharing) {
             console.log("[Interview] Remote participant started screen sharing");
+            setShowRemoteScreen(true);
           } else {
             console.log("[Interview] Remote participant stopped screen sharing");
+            setShowRemoteScreen(false);
+            setRemoteScreenStream(null);
+            if (remoteScreenVideoRef.current) {
+              remoteScreenVideoRef.current.srcObject = null;
+            }
           }
         });
 
@@ -412,15 +454,33 @@ const Interview = () => {
       if (!socketId || socketId === socketRef.current?.id) return;
       if (peerConnectionsRef.current[socketId]) return peerConnectionsRef.current[socketId];
 
-      // Fetch participant profile
+      // Initialize camera status as false (off) - matches actual camera state on join
+      setParticipantCameraStatus((prev) => ({
+        ...prev,
+        [socketId]: false,
+      }));
+
+      // Set placeholder profile immediately so avatar/initials display right away
+      // This allows the fallback initials avatar to render while profile data is being fetched
       if (clerkUserId) {
+        setParticipantProfiles((prev) => ({
+          ...prev,
+          [socketId]: {
+            clerk_user_id: clerkUserId,
+            display_name: "Participant",
+            avatar_url: null,
+          },
+        }));
+
+        // Fetch actual profile data in background to update with real avatar/name
         fetchParticipantProfile(clerkUserId, socketId);
       }
 
-      // Initialize camera status as true (on)
-      setParticipantCameraStatus((prev) => ({
+      // Add placeholder to remoteParticipants so video panel renders immediately
+      // This will show avatar while waiting for actual video stream
+      setRemoteParticipants((prev) => ({
         ...prev,
-        [socketId]: true,
+        [socketId]: null, // Placeholder - actual stream will replace this ontrack
       }));
 
       const peerConnection = new RTCPeerConnection({
@@ -436,17 +496,62 @@ const Interview = () => {
 
       // Handle remote stream
       peerConnection.ontrack = (event) => {
-        console.log("[WebRTC] Received remote track:", event.track.kind);
-        setRemoteParticipants((prev) => ({
-          ...prev,
-          [socketId]: event.streams[0],
-        }));
+        console.log("[WebRTC] Received remote track:", event.track.kind, "socketId:", socketId);
+        console.log("[WebRTC] Track label:", event.track.label);
+        console.log("[WebRTC] remoteScreenSharingRef state:", remoteScreenSharingRef.current);
+        
+        // Check both the ref AND track properties for screen detection
+        let isScreenShare = remoteScreenSharingRef.current[socketId];
+        console.log("[WebRTC] isScreenShare from ref:", isScreenShare);
+        
+        // Additional detection: check track label for "screen" or "display"
+        if (!isScreenShare && event.track.kind === "video") {
+          const label = event.track.label?.toLowerCase() || "";
+          if (label.includes("screen") || label.includes("display") || label.includes("chrome") || label.includes("firefox")) {
+            console.log("[WebRTC] Detected screen share from track label:", label);
+            isScreenShare = true;
+          }
+        }
+        
+        // Fallback: Try video dimensions if available after a brief delay
+        if (!isScreenShare && event.track.kind === "video") {
+          // Screen shares often have larger dimensions; try to detect
+          const settings = event.track.getSettings?.();
+          if (settings?.width && settings?.height) {
+            console.log("[WebRTC] Video dimensions - Width:", settings.width, "Height:", settings.height);
+            // Most screens are 1920x1080 or larger, most cameras are 640x480 to 1280x720
+            isScreenShare = settings.width > 1000;
+            if (isScreenShare) {
+              console.log("[WebRTC] Detected screen share by dimensions");
+            }
+          }
+        }
+        
+        if (isScreenShare && event.track.kind === "video") {
+          // Route screen share to screen video element
+          console.log("[WebRTC] ✓✓✓ ROUTING TO SCREEN SHARE DISPLAY ✓✓✓");
+          setShowRemoteScreen(true);
+          setRemoteScreenStream(event.streams[0]);
+          if (remoteScreenVideoRef.current && event.streams[0]) {
+            remoteScreenVideoRef.current.srcObject = event.streams[0];
+            remoteScreenVideoRef.current.play?.().catch((err) => {
+              console.warn("[WebRTC] Remote screen play failed:", err?.message || err);
+            });
+          }
+        } else {
+          // Route camera to regular remote video
+          console.log("[WebRTC] ROUTING TO CAMERA DISPLAY");
+          setRemoteParticipants((prev) => ({
+            ...prev,
+            [socketId]: event.streams[0],
+          }));
 
-        if (remoteVideoRef.current && event.streams[0]) {
-          remoteVideoRef.current.srcObject = event.streams[0];
-          remoteVideoRef.current.play?.().catch((err) => {
-            console.warn("[WebRTC] Remote video play failed:", err?.message || err);
-          });
+          if (remoteVideoRef.current && event.streams[0]) {
+            remoteVideoRef.current.srcObject = event.streams[0];
+            remoteVideoRef.current.play?.().catch((err) => {
+              console.warn("[WebRTC] Remote video play failed:", err?.message || err);
+            });
+          }
         }
       };
 
@@ -515,26 +620,183 @@ const Interview = () => {
     await Promise.all(
       peers.map(async (pc) => {
         const sender = pc.getSenders().find((s) => s.track?.kind === "video");
-        if (sender) {
-          await sender.replaceTrack(nextTrack);
+        
+        if (nextTrack) {
+          // Adding or replacing with a real track
+          if (sender) {
+            // Sender exists, replace the track
+            await sender.replaceTrack(nextTrack);
+          } else {
+            // No sender yet, add the track for the first time
+            pc.addTrack(nextTrack, localStreamRef.current);
+            
+            // Trigger renegotiation by creating a new offer
+            try {
+              const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+              await pc.setLocalDescription(offer);
+              
+              // Find the socket ID for this peer connection
+              const socketId = Object.entries(peerConnectionsRef.current).find(
+                ([_, p]) => p === pc
+              )?.[0];
+              
+              if (socketId && socketRef.current) {
+                socketRef.current.emit("offer", {
+                  to: socketId,
+                  offer,
+                  interviewId,
+                });
+                console.log("[WebRTC] Renegotiation offer sent for video track");
+              }
+            } catch (error) {
+              console.error("[WebRTC] Error creating renegotiation offer for video:", error);
+            }
+          }
+        } else if (sender) {
+          // Removing track: remove the sender entirely instead of replacing with null
+          pc.removeTrack(sender);
+          
+          // Trigger renegotiation to inform remote peer
+          try {
+            const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+            await pc.setLocalDescription(offer);
+            
+            // Find the socket ID for this peer connection
+            const socketId = Object.entries(peerConnectionsRef.current).find(
+              ([_, p]) => p === pc
+            )?.[0];
+            
+            if (socketId && socketRef.current) {
+              socketRef.current.emit("offer", {
+                to: socketId,
+                offer,
+                interviewId,
+              });
+              console.log("[WebRTC] Renegotiation offer sent to remove video track");
+            }
+          } catch (error) {
+            console.error("[WebRTC] Error creating renegotiation offer to remove video:", error);
+          }
         }
       })
     );
   };
 
-  const handleToggleMic = () => {
-    if (localStreamRef.current) {
-      const audioTracks = localStreamRef.current.getAudioTracks();
-      const nextMuted = !muted;
-      audioTracks.forEach((track) => {
-        track.enabled = !nextMuted;
-      });
-      setMuted(nextMuted);
+  const replaceOutgoingAudioTrack = async (nextTrack) => {
+    const peers = Object.values(peerConnectionsRef.current);
+    await Promise.all(
+      peers.map(async (pc) => {
+        const sender = pc.getSenders().find((s) => s.track?.kind === "audio");
+        
+        if (nextTrack) {
+          // Adding or replacing with a real track
+          if (sender) {
+            // Sender exists, replace the track
+            await sender.replaceTrack(nextTrack);
+          } else {
+            // No sender yet, add the track for the first time
+            pc.addTrack(nextTrack, localStreamRef.current);
+            
+            // Trigger renegotiation by creating a new offer
+            try {
+              const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+              await pc.setLocalDescription(offer);
+              
+              // Find the socket ID for this peer connection
+              const socketId = Object.entries(peerConnectionsRef.current).find(
+                ([_, p]) => p === pc
+              )?.[0];
+              
+              if (socketId && socketRef.current) {
+                socketRef.current.emit("offer", {
+                  to: socketId,
+                  offer,
+                  interviewId,
+                });
+                console.log("[WebRTC] Renegotiation offer sent for audio track");
+              }
+            } catch (error) {
+              console.error("[WebRTC] Error creating renegotiation offer for audio:", error);
+            }
+          }
+        } else if (sender) {
+          // Removing track: remove the sender entirely instead of replacing with null
+          pc.removeTrack(sender);
+          
+          // Trigger renegotiation to inform remote peer
+          try {
+            const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+            await pc.setLocalDescription(offer);
+            
+            // Find the socket ID for this peer connection
+            const socketId = Object.entries(peerConnectionsRef.current).find(
+              ([_, p]) => p === pc
+            )?.[0];
+            
+            if (socketId && socketRef.current) {
+              socketRef.current.emit("offer", {
+                to: socketId,
+                offer,
+                interviewId,
+              });
+              console.log("[WebRTC] Renegotiation offer sent to remove audio track");
+            }
+          } catch (error) {
+            console.error("[WebRTC] Error creating renegotiation offer to remove audio:", error);
+          }
+        }
+      })
+    );
+  };
 
+  const handleToggleMic = async () => {
+    const nextMuted = !muted;
+    
+    if (nextMuted) {
+      // Turning OFF: stop and remove audio tracks
+      if (localStreamRef.current) {
+        localStreamRef.current.getAudioTracks().forEach((track) => {
+          track.stop();
+          localStreamRef.current.removeTrack(track);
+        });
+      }
+      setMuted(true);
       socketRef.current.emit("toggle-audio", {
         interviewId,
-        enabled: !nextMuted,
+        enabled: false,
       });
+    } else {
+      // Turning ON: request audio and add to stream and peer connections
+      try {
+        const audioStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+        });
+        
+        const audioTrack = audioStream.getAudioTracks()[0];
+        
+        if (localStreamRef.current && audioTrack) {
+          // Add audio track to local stream
+          localStreamRef.current.addTrack(audioTrack);
+          
+          // Add audio track to all peer connections
+          await replaceOutgoingAudioTrack(audioTrack);
+        }
+        
+        setMuted(false);
+        socketRef.current.emit("toggle-audio", {
+          interviewId,
+          enabled: true,
+        });
+      } catch (error) {
+        console.error("[Interview] Error enabling microphone:", error);
+        if (error.name === "NotAllowedError") {
+          setPermissionError("Microphone permission denied. Please enable it in browser settings.");
+        } else if (error.name === "NotFoundError") {
+          setPermissionError("No microphone found on this device.");
+        } else {
+          setPermissionError(`Microphone error: ${error.message}`);
+        }
+      }
     }
   };
 
@@ -809,28 +1071,43 @@ const Interview = () => {
                 <div className="relative w-full rounded-xl border border-white/10 bg-black/60 p-3 aspect-video flex items-center justify-center text-slate-300 overflow-hidden">
                   {Object.values(remoteParticipants).length > 0 ? (
                     <>
-                      <video
-                        ref={remoteVideoRef}
-                        autoPlay
-                        playsInline
-                        className="w-full h-full object-cover"
-                      />
-                      {/* Show avatar overlay when camera is off */}
                       {(() => {
                         const remoteSocketId = Object.keys(remoteParticipants)[0];
                         const cameraEnabled = participantCameraStatus[remoteSocketId] !== false;
-                        const profile = participantProfiles[remoteSocketId];
                         return (
-                          !cameraEnabled && profile?.avatar_url && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+                          <>
+                            <video
+                              ref={remoteVideoRef}
+                              autoPlay
+                              playsInline
+                              className={`w-full h-full object-cover ${
+                                cameraEnabled ? "opacity-100" : "opacity-0"
+                              }`}
+                            />
+                            {!cameraEnabled && (
+                              <div className="absolute inset-0 bg-black/80" />
+                            )}
+                          </>
+                        );
+                      })()}
+                      {/* Show avatar overlay when camera is off (only if avatar_url exists) */}
+                      {(() => {
+                        const remoteSocketId = Object.keys(remoteParticipants)[0];
+                        const cameraEnabled = participantCameraStatus[remoteSocketId] !== false;
+                        const remoteProfile = participantProfiles[remoteSocketId];
+                        
+                        if (!cameraEnabled && remoteProfile?.avatar_url) {
+                          return (
+                            <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80">
                               <img
-                                src={profile.avatar_url}
-                                alt={profile.display_name || "Participant"}
+                                src={remoteProfile.avatar_url}
+                                alt={remoteProfile.display_name || "Participant"}
                                 className="w-40 h-40 rounded-full object-cover border-4 border-white/20"
                               />
                             </div>
-                          )
-                        );
+                          );
+                        }
+                        return null;
                       })()}
                     </>
                   ) : (
@@ -842,7 +1119,7 @@ const Interview = () => {
                   )}
 
                   {/* Signal strength */}
-                  <div className="absolute left-3 top-3 flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-2 py-1 text-[11px] text-slate-200">
+                  <div className="absolute left-3 top-3 z-20 flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-2 py-1 text-[11px] text-slate-200">
                     <div className="flex items-end gap-0.5">
                       {[1, 2, 3, 4, 5].map((i) => (
                         <span
@@ -856,7 +1133,7 @@ const Interview = () => {
                     </div>
                   </div>
 
-                  <div className="absolute right-3 top-3 rounded-full border border-white/10 bg-black/40 px-2 py-1 text-[11px] text-slate-200">
+                  <div className="absolute right-3 top-3 rounded-full border border-white/20 bg-black/20 px-2 py-1 text-[11px] text-slate-100 font-medium">
                     Other Participant
                   </div>
                 </div>
@@ -876,22 +1153,25 @@ const Interview = () => {
                     autoPlay
                     muted
                     playsInline
-                    className="w-full h-full object-cover"
+                    className={`w-full h-full object-cover ${
+                      cameraOn ? "opacity-100" : "opacity-0"
+                    }`}
                   />
+                  {!cameraOn && <div className="absolute inset-0 bg-black/80" />}
 
-                  {/* Show avatar overlay when camera is off */}
+                  {/* Show avatar overlay when camera is off (only if avatar_url exists) */}
                   {!cameraOn && profile?.avatar_url && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/80">
                       <img
                         src={profile.avatar_url}
-                        alt={profile.display_name || "You"}
+                        alt={profile?.display_name || "You"}
                         className="w-40 h-40 rounded-full object-cover border-4 border-white/20"
                       />
                     </div>
                   )}
 
                   {/* Signal strength */}
-                  <div className="absolute left-3 top-3 flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-2 py-1 text-[11px] text-slate-200">
+                  <div className="absolute left-3 top-3 z-20 flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-2 py-1 text-[11px] text-slate-200">
                     <div className="flex items-end gap-0.5">
                       {[1, 2, 3, 4, 5].map((i) => (
                         <span
@@ -905,7 +1185,7 @@ const Interview = () => {
                     </div>
                   </div>
 
-                  <div className="absolute right-3 top-3 rounded-full border border-white/10 bg-black/40 px-2 py-1 text-[11px] text-slate-200">
+                  <div className="absolute right-3 top-3 rounded-full border border-white/20 bg-black/20 px-2 py-1 text-[11px] text-slate-100 font-medium">
                     You
                   </div>
                 </div>
@@ -930,15 +1210,30 @@ const Interview = () => {
           </div>
         )}
 
+        {showRemoteScreen && (
+          <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-sm px-2 py-4 sm:px-4">
+            <div className="relative h-full w-[98vw] max-h-[96vh] overflow-hidden rounded-2xl border border-cyan-400/40 bg-slate-950 shadow-2xl shadow-cyan-900/40">
+              <div className="h-full overflow-hidden">
+                <SharedScreen 
+                  onClose={() => setShowRemoteScreen(false)}
+                  videoRef={remoteScreenVideoRef}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="pointer-events-none relative mb-6 flex items-center justify-center">
           <div className="pointer-events-auto inline-flex flex-wrap items-center gap-2 rounded-full border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-slate-900/40 backdrop-blur">
-            <button
-              onClick={() => setShowCode((v) => !v)}
-              className="rounded-full bg-white/10 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/20 flex items-center gap-2"
-            >
-              <LuCodeXml className="text-cyan-300" />
-              Code
-            </button>
+            {problemData && (
+              <button
+                onClick={() => setShowCode((v) => !v)}
+                className="rounded-full bg-white/10 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/20 flex items-center gap-2"
+              >
+                <LuCodeXml className="text-cyan-300" />
+                Code
+              </button>
+            )}
             <button
               onClick={handleToggleMic}
               className={`rounded-full px-3 py-2 text-sm font-semibold transition flex items-center gap-2 ${
@@ -959,18 +1254,38 @@ const Interview = () => {
               {cameraOn ? <FaVideo /> : <FaVideoSlash />}
               {cameraOn ? "Video On" : "Video Off"}
             </button>
-            <button
-              onClick={handleToggleScreenShare}
-              className={`rounded-full px-3 py-2 text-sm font-semibold transition flex items-center gap-2 ${
-                screenSharing
-                  ? "bg-emerald-500/80 text-white"
-                  : "bg-white/10 text-slate-100 hover:bg-white/20"
-              }`}
-              disabled={screenSharing === null}
-            >
-              {screenSharing ? <MdOutlinePersonalVideo /> : <LuScreenShareOff />}
-              {screenSharing ? "Stop Sharing" : "Share Screen"}
-            </button>
+
+            {/* Screen Share button - Only for candidates */}
+            {profile?.app_role !== "staff" && (
+              <button
+                onClick={handleToggleScreenShare}
+                className={`rounded-full px-3 py-2 text-sm font-semibold transition flex items-center gap-2 ${
+                  screenSharing
+                    ? "bg-emerald-500/80 text-white"
+                    : "bg-white/10 text-slate-100 hover:bg-white/20"
+                }`}
+                disabled={screenSharing === null}
+              >
+                {screenSharing ? <MdOutlinePersonalVideo /> : <LuScreenShareOff />}
+                {screenSharing ? "Stop Sharing" : "Share Screen"}
+              </button>
+            )}
+
+            {/* Show Screen button - For interviewers (always visible, disabled when no screen sharing) */}
+            {profile?.app_role === "staff" && (
+              <button
+                onClick={() => Object.values(remoteParticipantScreenSharing).some(v => v) && setShowRemoteScreen(true)}
+                disabled={!Object.values(remoteParticipantScreenSharing).some(v => v)}
+                className={`rounded-full px-3 py-2 text-sm font-semibold transition flex items-center gap-2 ${
+                  Object.values(remoteParticipantScreenSharing).some(v => v)
+                    ? "bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 hover:bg-cyan-500/30 cursor-pointer"
+                    : "bg-slate-800/50 text-slate-500 border border-slate-600/40 cursor-not-allowed hover:cursor-not-allowed"
+                }`}
+              >
+                <MdOutlinePersonalVideo />
+                Show Screen
+              </button>
+            )}
             <button
               onClick={handleEndCall}
               className="rounded-full bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-500"
