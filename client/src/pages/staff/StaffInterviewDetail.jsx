@@ -15,8 +15,10 @@ const StaffInterviewDetail = () => {
     return <Navigate to="/" />;
   }
   const [interview, setInterview] = useState(null);
+  const [problemData, setProblemData] = useState(null);
   const [codeSubmissions, setCodeSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [transforming, setTransforming] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [formData, setFormData] = useState({
@@ -38,6 +40,15 @@ const StaffInterviewDetail = () => {
           candidate_rating: interviewRes.data.candidate_rating || '',
           technical_score: interviewRes.data.technical_score || '',
         });
+
+        // Fetch problem data for this interview
+        try {
+          const problemRes = await axiosInstance.get(`/api/interview-problems/${interviewId}`);
+          setProblemData(problemRes.data);
+        } catch (error) {
+          console.error('Error fetching problem data:', error);
+          // Continue without problem data
+        }
 
         // Fetch code submissions from this interview
         const submissionsRes = await axiosInstance.get(`/api/interviews/${interviewId}/code-submissions`);
@@ -72,6 +83,32 @@ const StaffInterviewDetail = () => {
       setEditMode(false);
     } catch (error) {
       console.error('Error updating interview:', error);
+    }
+  };
+
+  const handleTransformProblem = async () => {
+    if (!problemData) {
+      console.error('Problem data not loaded');
+      return;
+    }
+
+    try {
+      setTransforming(true);
+      const response = await axiosInstance.post(`/api/interview-problems/${interviewId}/transform`);
+      
+      // Update local problemData with the transformed description
+      setProblemData({
+        ...problemData,
+        gemini_description: response.data.gemini_description,
+      });
+      
+      // Show success toast
+      console.log('Problem description transformed successfully');
+    } catch (error) {
+      console.error('Error transforming problem description:', error);
+      // Show error toast - you can integrate a toast library here
+    } finally {
+      setTransforming(false);
     }
   };
 
@@ -145,6 +182,15 @@ const StaffInterviewDetail = () => {
               >
                 Join Interview
               </button>
+              {problemData && !problemData.gemini_description && (
+                <button
+                  onClick={handleTransformProblem}
+                  disabled={transforming}
+                  className="rounded-lg bg-amber-500/20 px-4 py-2 text-amber-400 transition hover:bg-amber-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {transforming ? 'Transforming...' : '✨ Transform Problem'}
+                </button>
+              )}
               {interview.status !== 'Completed' && !editMode && (
                 <button
                   onClick={() => setEditMode(true)}
@@ -159,6 +205,37 @@ const StaffInterviewDetail = () => {
           <div className="grid gap-8 lg:grid-cols-3">
             {/* Main Content */}
             <div className="lg:col-span-2 space-y-6">
+              {/* Problem Details */}
+              {problemData && (
+                <div className="rounded-lg border border-white/10 bg-white/5 p-6 backdrop-blur">
+                  <h2 className="mb-4 text-lg font-bold">Problem</h2>
+                  
+                  {/* Problem Title */}
+                  <div className="mb-4">
+                    <h3 className="text-sm font-medium text-slate-300">Title</h3>
+                    <p className="mt-1 text-slate-50">{problemData.title || 'N/A'}</p>
+                  </div>
+
+                  {/* Original Description */}
+                  <div className="mb-4">
+                    <h3 className="text-sm font-medium text-slate-300">Original Description</h3>
+                    <div className="mt-1 rounded border border-slate-700 bg-slate-800/50 p-3 text-slate-50 max-h-48 overflow-y-auto">
+                      {problemData.description || 'No description provided'}
+                    </div>
+                  </div>
+
+                  {/* AI-Transformed Description */}
+                  {problemData.gemini_description && (
+                    <div className="mb-4">
+                      <h3 className="text-sm font-medium text-amber-400">✨ AI-Transformed Description</h3>
+                      <div className="mt-1 rounded border border-amber-500/30 bg-amber-500/10 p-3 text-slate-50 max-h-48 overflow-y-auto">
+                        {problemData.gemini_description}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Feedback Form */}
               {editMode && (
                 <div className="rounded-lg border border-white/10 bg-white/5 p-6 backdrop-blur">

@@ -22,6 +22,7 @@ import submissionsRoutes from "./routes/submissions.route.js";
 import webhooksRoutes from "./routes/webhooks.route.js";
 import problemsRoutes from "./routes/problems.route.js";
 import interviewsRoutes from "./routes/interviews.route.js";
+import interviewProblemsRoutes from "./routes/interview_problems.route.js";
 import { startVMSyncJob } from "./jobs/vmSync.job.js";
 import { trackActivityAndStartVM } from "./middleware/auth.middleware.js";
 import { setupInterviewSignaling } from "./lib/webrtc.signaling.js";
@@ -65,6 +66,8 @@ app.use("/api/users", trackActivityAndStartVM, usersRoutes);
 app.use("/api/submissions", trackActivityAndStartVM, submissionsRoutes);
 // Interview Routes (with activity tracking)
 app.use("/api/interviews", trackActivityAndStartVM, interviewsRoutes);
+// Interview Problems Routes (with activity tracking)
+app.use("/api/interview-problems", trackActivityAndStartVM, interviewProblemsRoutes);
 
 // Global error handler
 app.use((err, req, res, next) => {

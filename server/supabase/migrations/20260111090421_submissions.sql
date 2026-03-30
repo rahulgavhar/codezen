@@ -30,8 +30,12 @@ CREATE TABLE public.submissions (
   clerk_user_id TEXT NOT NULL
     REFERENCES public.user_profiles(clerk_user_id) ON DELETE CASCADE,
 
+  -- Either problem_id or interview_id (mutually exclusive)
   problem_id UUID
     REFERENCES public.problems(id) ON DELETE CASCADE,
+
+  interview_id UUID
+    REFERENCES public.interviews(id) ON DELETE SET NULL,
 
   -- Lifecycle
   submitted_at timestamptz NOT NULL DEFAULT now(),
@@ -82,6 +86,14 @@ ALTER TABLE public.submissions
 ADD CONSTRAINT chk_testcase_counts
 CHECK (test_cases_passed <= test_cases_total);
 
+-- Either problem_id or interview_id (mutually exclusive)
+ALTER TABLE public.submissions
+ADD CONSTRAINT chk_problem_or_interview
+CHECK (
+  (problem_id IS NOT NULL AND interview_id IS NULL)
+  OR (problem_id IS NULL AND interview_id IS NOT NULL)
+);
+
 --------------------------------------------------------------------------------
 -- Indexes (HIGHLY IMPORTANT FOR SCALE)
 --------------------------------------------------------------------------------
@@ -112,6 +124,22 @@ ON public.submissions (verdict);
 CREATE UNIQUE INDEX idx_submissions_judge0_token
 ON public.submissions (judge0_token)
 WHERE judge0_token IS NOT NULL;
+
+-- Interview submissions filtering
+CREATE INDEX idx_submissions_interview
+ON public.submissions (interview_id)
+WHERE interview_id IS NOT NULL;
+
+-- Interview submission timeline
+CREATE INDEX idx_submissions_interview_time
+ON public.submissions (interview_id, submitted_at DESC)
+WHERE interview_id IS NOT NULL;
+
+--------------------------------------------------------------------------------
+-- Column Comments
+--------------------------------------------------------------------------------
+COMMENT ON COLUMN public.submissions.interview_id IS
+  'Reference to interview if submission was made during interview room. NULL for normal problem submissions. Mutually exclusive with problem_id.';
 
 --------------------------------------------------------------------------------
 -- Trigger: Validate execution metrics

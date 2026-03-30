@@ -47,6 +47,7 @@ const Interview = () => {
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [participantProfiles, setParticipantProfiles] = useState({});
   const [participantCameraStatus, setParticipantCameraStatus] = useState({});
+  const [problemData, setProblemData] = useState(null);
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
@@ -117,6 +118,15 @@ const Interview = () => {
             end_time: interview.end_time,
           });
 
+          // Fetch interview problem data for the code editor
+          try {
+            const problemRes = await axiosInstance.get(`/api/interview-problems/${interviewId}`);
+            setProblemData(problemRes.data);
+          } catch (problemErr) {
+            console.warn("[Interview] Could not load problem data:", problemErr?.message);
+            // Don't block interview if problem data isn't available
+          }
+
           // Only block if status is explicitly Completed/Cancelled
           if (endedByStatus) {
             setAccessError("This interview has ended and cannot be joined.");
@@ -144,13 +154,14 @@ const Interview = () => {
           reconnectionAttempts: 5,
         });
 
-        // Get local media stream
-        console.log("[Interview] Requesting media permissions...");
+        // Get local media stream (audio only initially to avoid camera light)
+        console.log("[Interview] Requesting audio permissions...");
         let stream;
         try {
+          // Request ONLY audio initially - video will be requested when user enables camera
+          // This prevents the camera light from turning on unnecessarily
           stream = await navigator.mediaDevices.getUserMedia({
             audio: { echoCancellation: true, noiseSuppression: true },
-            video: { width: { ideal: 1280 }, height: { ideal: 720 } },
           });
 
           // In React StrictMode dev, effect can run twice. If this invocation was
@@ -160,15 +171,15 @@ const Interview = () => {
             return;
           }
 
-          console.log("[Interview] Media stream acquired:", stream.getTracks());
+          console.log("[Interview] Audio stream acquired:", stream.getTracks());
         } catch (mediaErr) {
           console.error("[Interview] getUserMedia error:", mediaErr.name, mediaErr.message);
           if (mediaErr.name === "NotAllowedError") {
-            setPermissionError("Camera and microphone permissions denied. Please enable them in browser settings.");
+            setPermissionError("Microphone permission denied. Please enable it in browser settings.");
             setMediaError("permission-denied");
           } else if (mediaErr.name === "NotFoundError") {
             setMediaError("no-device");
-            setPermissionError("No camera or microphone found on this device.");
+            setPermissionError("No microphone found on this device.");
           } else {
             setMediaError("unknown");
             setPermissionError(`Media error: ${mediaErr.message}`);
@@ -177,13 +188,10 @@ const Interview = () => {
         }
 
         localStreamRef.current = stream;
-        cameraTrackRef.current = stream.getVideoTracks()[0] || null;
+        cameraTrackRef.current = null; // No camera track initially
         
-        // Disable audio and video tracks initially (user must enable them)
+        // Disable audio track initially (user must enable it)
         stream.getAudioTracks().forEach((track) => {
-          track.enabled = false;
-        });
-        stream.getVideoTracks().forEach((track) => {
           track.enabled = false;
         });
         
@@ -910,7 +918,13 @@ const Interview = () => {
           <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-sm px-3 py-6 sm:px-6">
             <div className="relative h-full w-[94vw] max-w-8xl max-h-[96vh] overflow-hidden rounded-2xl border border-cyan-400/40 bg-slate-950 shadow-2xl shadow-cyan-900/40">
               <div className="h-full overflow-hidden">
-                <CodeEditor onClose={() => setShowCode(false)} />
+                <CodeEditor 
+                  onClose={() => setShowCode(false)} 
+                  problemData={problemData}
+                  socket={socketRef.current}
+                  interviewId={interviewId}
+                  role={profile?.app_role}
+                />
               </div>
             </div>
           </div>

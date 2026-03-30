@@ -20,4 +20,5 @@ export const ENV = {
   CLIENT_SECRET: process.env.CLIENT_SECRET || "",
   RESOURCE_GROUP: process.env.RESOURCE_GROUP || "",
   VM_NAME: process.env.VM_NAME || "",
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY || "",
 };

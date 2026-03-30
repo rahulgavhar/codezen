@@ -1,8 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Editor from "@monaco-editor/react";
 import { FaPlay } from "react-icons/fa";
 
-const CodeEditor = ({ onClose }) => {
+const CodeEditor = ({ onClose, problemData, socket, interviewId, role }) => {
   const boilerplates = {
     javascript: `function solve() {
     // your code goes here
@@ -46,6 +46,77 @@ class Main {
   const [activeTab, setActiveTab] = useState("description");
   const [testResults, setTestResults] = useState(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [isReadOnly, setIsReadOnly] = useState(role === "staff"); // Interviewer (staff) can't edit
+  const [syncStatus, setSyncStatus] = useState(""); // For showing sync status messages
+
+  const editorRef = useRef(null);
+  const codeChangeTimeoutRef = useRef(null);
+
+  // Setup Socket.IO listeners for real-time code sync
+  useEffect(() => {
+    if (!socket) return;
+
+    // Listen for code changes from other participant (mainly candidate edits)
+    const handleCodeChanged = (data) => {
+      console.log("[CodeEditor] Received code change from:", data.from);
+      if (role === "staff") {
+        // Interviewer receives code updates
+        setCode(data.code);
+        setLanguage(data.language || "cpp");
+        setSyncStatus("Code updated from candidate");
+        setTimeout(() => setSyncStatus(""), 2000);
+      }
+    };
+
+    // Listen for sync requests (interviewer asking for full code snapshot)
+    const handleCodeSyncRequest = (data) => {
+      console.log("[CodeEditor] Received sync request");
+      if (role !== "staff") {
+        // Candidate responds with full code
+        socket.emit("code-sync-response", {
+          interviewId,
+          to: data.from,
+          code,
+          language,
+        });
+      }
+    };
+
+    // Listen for sync responses (receiving full code snapshot)
+    const handleCodeSynced = (data) => {
+      console.log("[CodeEditor] Received code sync response");
+      if (role === "staff") {
+        // Interviewer receives code snapshot
+        setCode(data.code);
+        setLanguage(data.language || "cpp");
+        setSyncStatus("Code synchronized");
+        setTimeout(() => setSyncStatus(""), 2000);
+      }
+    };
+
+    socket.on("code-changed", handleCodeChanged);
+    socket.on("code-sync-request", handleCodeSyncRequest);
+    socket.on("code-synced", handleCodeSynced);
+
+    return () => {
+      socket.off("code-changed", handleCodeChanged);
+      socket.off("code-sync-request", handleCodeSyncRequest);
+      socket.off("code-synced", handleCodeSynced);
+    };
+  }, [socket, interviewId, role, code, language]);
+
+  // Request code sync when component mounts (for interviewer)
+  useEffect(() => {
+    if (role === "staff" && socket && interviewId) {
+      console.log("[CodeEditor] Requesting code sync from candidate");
+      // Request full code from candidate (need to get candidate's socket id from somewhere)
+      // For now, we broadcast to the room
+      socket.emit("code-sync-request", {
+        interviewId,
+        to: "broadcast", // This would need to be the candidate's socket ID
+      });
+    }
+  }, [role, socket, interviewId]);
 
   const handleEditorWillMount = (monaco) => {
     monaco.editor.defineTheme("codezen-dark", {
@@ -92,6 +163,37 @@ class Main {
     setCode(boilerplates[language] ?? "// your code goes here");
   };
 
+  const handleCodeChange = (newCode) => {
+    setCode(newCode);
+
+    // Only candidate can edit and broadcast code changes
+    if (role !== "staff" && socket && interviewId) {
+      // Debounce code change events
+      clearTimeout(codeChangeTimeoutRef.current);
+      codeChangeTimeoutRef.current = setTimeout(() => {
+        socket.emit("code-change", {
+          interviewId,
+          code: newCode,
+          language,
+        });
+      }, 300);
+    }
+  };
+
+  const handleLanguageChange = (newLanguage) => {
+    setLanguage(newLanguage);
+    setCode(boilerplates[newLanguage] ?? "// your code goes here");
+
+    // Broadcast language change if candidate
+    if (role !== "staff" && socket && interviewId) {
+      socket.emit("code-change", {
+        interviewId,
+        code: boilerplates[newLanguage] ?? "// your code goes here",
+        language: newLanguage,
+      });
+    }
+  };
+
   const handleRun = () => {
     setIsRunning(true);
     setActiveTab("result");
@@ -119,6 +221,14 @@ class Main {
     }, 1200);
   };
 
+  const handleEditorMount = (editor, monaco) => {
+    editorRef.current = editor;
+    // Set read-only for interviewer
+    if (isReadOnly) {
+      editor.updateOptions({ readOnly: true });
+    }
+  };
+
   return (
     <div className="flex h-screen flex-col bg-slate-950 text-slate-50">
       {/* Header */}
@@ -140,6 +250,16 @@ class Main {
               <span className="text-sm font-semibold">Codezen</span>
             </>
           )}
+          {isReadOnly && (
+            <span className="ml-2 text-xs font-semibold text-amber-300 bg-amber-500/20 px-2 py-1 rounded-lg">
+              Read-Only (Viewing)
+            </span>
+          )}
+          {syncStatus && (
+            <span className="ml-2 text-xs font-semibold text-emerald-300 bg-emerald-500/20 px-2 py-1 rounded-lg">
+              {syncStatus}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-18 items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-white/5">
@@ -153,11 +273,8 @@ class Main {
           <select
             className="select select-sm rounded-lg border border-white/10 bg-white/5 text-xs text-slate-100"
             value={language}
-            onChange={(e) => {
-              const next = e.target.value;
-              setLanguage(next);
-              setCode(boilerplates[next] ?? "// your code goes here");
-            }}
+            onChange={(e) => handleLanguageChange(e.target.value)}
+            disabled={isReadOnly}
           >
             {languageOptions.map((lang) => (
               <option
@@ -177,8 +294,9 @@ class Main {
           </select>
           <button
             onClick={handleRun}
-            disabled={isRunning}
+            disabled={isRunning || isReadOnly}
             className="btn btn-sm rounded-lg border border-white/10 bg-white/5 text-slate-50 transition hover:border-cyan-400/60 disabled:bg-slate-700 disabled:text-slate-400"
+            title={isReadOnly ? "Interviewers cannot run code" : ""}
           >
             {isRunning ? (
               <>
@@ -192,7 +310,11 @@ class Main {
               </span>
             )}
           </button>
-          <button className="btn btn-sm rounded-lg border-none bg-emerald-500 text-slate-950 shadow-lg transition hover:bg-emerald-400">
+          <button 
+            className="btn btn-sm rounded-lg border-none bg-emerald-500 text-slate-950 shadow-lg transition hover:bg-emerald-400 disabled:bg-slate-600 disabled:text-slate-400 disabled:cursor-not-allowed" 
+            disabled={isReadOnly} 
+            title={isReadOnly ? "Interviewers cannot submit code" : ""}
+          >
             Submit
           </button>
         </div>
@@ -240,110 +362,90 @@ class Main {
           <div className="flex-1 overflow-y-auto p-4 sm:p-6">
             {activeTab === "description" && (
               <div className="space-y-4">
-                <div>
-                  <h1 className="text-xl font-bold sm:text-2xl">1. Two Sum</h1>
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-xs font-semibold text-emerald-200 border border-emerald-400/30">
-                      Easy
-                    </span>
-                    <span className="text-xs text-slate-400">
-                      Acceptance: 49.2%
-                    </span>
-                  </div>
-                </div>
-
-                <div className="space-y-3 text-sm text-slate-300">
-                  <p>
-                    Given an array of integers{" "}
-                    <code className="rounded bg-slate-800 px-1.5 py-0.5 text-cyan-300">
-                      nums
-                    </code>{" "}
-                    and an integer{" "}
-                    <code className="rounded bg-slate-800 px-1.5 py-0.5 text-cyan-300">
-                      target
-                    </code>
-                    , return indices of the two numbers such that they add up to{" "}
-                    <code className="rounded bg-slate-800 px-1.5 py-0.5 text-cyan-300">
-                      target
-                    </code>
-                    .
-                  </p>
-                  <p>
-                    You may assume that each input would have exactly one
-                    solution, and you may not use the same element twice.
-                  </p>
-                  <p>You can return the answer in any order.</p>
-                </div>
-
-                <div className="space-y-3">
-                  <h3 className="font-semibold text-slate-100">Example 1:</h3>
-                  <div className="rounded-lg border border-white/10 bg-slate-900/70 p-3 text-sm">
-                    <div className="space-y-1 font-mono text-xs">
-                      <div>
-                        <span className="text-slate-400">Input:</span>{" "}
-                        <span className="text-cyan-300">
-                          nums = [2,7,11,15], target = 9
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400">Output:</span>{" "}
-                        <span className="text-emerald-300">[0,1]</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400">Explanation:</span>{" "}
-                        <span className="text-slate-300">
-                          Because nums[0] + nums[1] == 9, we return [0, 1].
+                {problemData ? (
+                  <>
+                    <div>
+                      <h1 className="text-xl font-bold sm:text-2xl">
+                        {problemData.title}
+                      </h1>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-xs font-semibold text-emerald-200 border border-emerald-400/30">
+                          {problemData.difficulty || "Medium"}
                         </span>
                       </div>
                     </div>
-                  </div>
-                </div>
 
-                <div className="space-y-3">
-                  <h3 className="font-semibold text-slate-100">Example 2:</h3>
-                  <div className="rounded-lg border border-white/10 bg-slate-900/70 p-3 text-sm">
-                    <div className="space-y-1 font-mono text-xs">
-                      <div>
-                        <span className="text-slate-400">Input:</span>{" "}
-                        <span className="text-cyan-300">
-                          nums = [3,2,4], target = 6
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400">Output:</span>{" "}
-                        <span className="text-emerald-300">[1,2]</span>
-                      </div>
+                    <div className="space-y-3 text-sm text-slate-300">
+                      {problemData.description && (
+                        <p>{problemData.description}</p>
+                      )}
+                      {problemData.gemini_description && (
+                        <div className="rounded-lg border border-cyan-400/30 bg-cyan-400/5 p-3">
+                          <p className="text-xs text-cyan-300 font-semibold mb-2">
+                            AI Description
+                          </p>
+                          <p className="text-sm">
+                            {problemData.gemini_description}
+                          </p>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                </div>
 
-                <div className="space-y-2">
-                  <h3 className="font-semibold text-slate-100">Constraints:</h3>
-                  <ul className="space-y-1 text-sm text-slate-300">
-                    <li className="flex items-start gap-2">
-                      <span className="mt-1 text-cyan-300">•</span>
-                      <code className="rounded bg-slate-800 px-1.5 py-0.5 text-cyan-300">
-                        2 &lt;= nums.length &lt;= 10⁴
-                      </code>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="mt-1 text-cyan-300">•</span>
-                      <code className="rounded bg-slate-800 px-1.5 py-0.5 text-cyan-300">
-                        -10⁹ &lt;= nums[i] &lt;= 10⁹
-                      </code>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="mt-1 text-cyan-300">•</span>
-                      <code className="rounded bg-slate-800 px-1.5 py-0.5 text-cyan-300">
-                        -10⁹ &lt;= target &lt;= 10⁹
-                      </code>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="mt-1 text-cyan-300">•</span>
-                      <span>Only one valid answer exists.</span>
-                    </li>
-                  </ul>
-                </div>
+                    {problemData.input_format && (
+                      <div className="space-y-2">
+                        <h3 className="font-semibold text-slate-100">
+                          Input Format:
+                        </h3>
+                        <p className="text-sm text-slate-300">
+                          {problemData.input_format}
+                        </p>
+                      </div>
+                    )}
+
+                    {problemData.output_format && (
+                      <div className="space-y-2">
+                        <h3 className="font-semibold text-slate-100">
+                          Output Format:
+                        </h3>
+                        <p className="text-sm text-slate-300">
+                          {problemData.output_format}
+                        </p>
+                      </div>
+                    )}
+
+                    {problemData.constraints && (
+                      <div className="space-y-2">
+                        <h3 className="font-semibold text-slate-100">
+                          Constraints:
+                        </h3>
+                        <p className="text-sm text-slate-300">
+                          {problemData.constraints}
+                        </p>
+                      </div>
+                    )}
+
+                    {problemData.hints && problemData.hints.length > 0 && (
+                      <div className="space-y-2">
+                        <h3 className="font-semibold text-slate-100">Hints:</h3>
+                        <ul className="space-y-1">
+                          {problemData.hints.map((hint, idx) => (
+                            <li
+                              key={idx}
+                              className="text-sm text-slate-300 flex items-start gap-2"
+                            >
+                              <span className="text-cyan-300">•</span>
+                              {hint}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-center text-slate-400 py-8">
+                    <p>No problem data available</p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -444,38 +546,39 @@ class Main {
         {/* Right Panel - Code Editor */}
         <div className="hidden w-1/2 flex-col lg:flex">
           <div className="flex items-center justify-between border-b border-white/10 bg-slate-900/50 px-4 py-2">
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Code</span>
-            </div>
-            <button
-              onClick={handleReset}
-              className="text-xs text-slate-400 transition hover:text-slate-200"
-            >
-              Reset
-            </button>
+            <span className="text-sm font-semibold text-slate-200">Code</span>
+            {!isReadOnly && (
+              <button
+                onClick={handleReset}
+                className="text-xs font-semibold text-slate-400 transition hover:text-slate-200"
+              >
+                Reset
+              </button>
+            )}
           </div>
-          <div className="flex-1">
-            <Editor
-              height="100%"
-              language={languageMap[language]}
-              value={code}
-              onChange={(value) => setCode(value || "")}
-              theme="codezen-dark"
-              beforeMount={handleEditorWillMount}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 14,
-                lineNumbers: "on",
-                roundedSelection: false,
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                tabSize: 2,
-                wordWrap: "on",
-                padding: { top: 16, bottom: 16 },
-              }}
-            />
-          </div>
+          <Editor
+            height="100%"
+            language={languageMap[language] || "cpp"}
+            value={code}
+            onChange={handleCodeChange}
+            onMount={handleEditorMount}
+            beforeMount={handleEditorWillMount}
+            theme="codezen-dark"
+            options={{
+              readOnly: isReadOnly,
+              minimap: { enabled: false },
+              fontSize: 13,
+              fontFamily: 'Fira Code, monospace',
+              wordWrap: "on",
+              automaticLayout: true,
+              scrollBeyondLastLine: false,
+              padding: { top: 16, bottom: 16 },
+              renderWhitespace: "boundary",
+              bracketPairColorization: {
+                enabled: true,
+              },
+            }}
+          />
         </div>
       </div>
     </div>

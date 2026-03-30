@@ -220,6 +220,41 @@ export function setupInterviewSignaling(io) {
       });
     });
 
+    // Handle code changes (only candidate can edit, interviewer receives as read-only)
+    socket.on("code-change", (data) => {
+      const { interviewId, code, language } = data;
+      const roomId = `interview_${interviewId}`;
+      // Broadcast code change to all other participants (mainly interviewer)
+      socket.to(roomId).emit("code-changed", {
+        from: socket.id,
+        code,
+        language,
+        timestamp: Date.now(),
+      });
+    });
+
+    // Handle code sync request (interviewer requests full code snapshot)
+    socket.on("code-sync-request", (data) => {
+      const { interviewId, to } = data;
+      // Send sync request only to the specified participant (candidate)
+      io.to(to).emit("code-sync-request", {
+        from: socket.id,
+        interviewId,
+      });
+    });
+
+    // Handle code sync response (candidate sends full code snapshot)
+    socket.on("code-sync-response", (data) => {
+      const { interviewId, code, language, to } = data;
+      // Send code snapshot to the requesting participant (interviewer)
+      io.to(to).emit("code-synced", {
+        from: socket.id,
+        code,
+        language,
+        timestamp: Date.now(),
+      });
+    });
+
     // Handle screen share started
     socket.on("screen-share-started", (data) => {
       const { interviewId, clerkUserId } = data;
