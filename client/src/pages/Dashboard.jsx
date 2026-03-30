@@ -186,10 +186,12 @@ const Dashboard = () => {
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1">
                       <h3 className="text-lg font-semibold text-slate-50 group-hover:text-cyan-200">
-                        {interview.problem?.title || "Technical Interview"}
+                        {interview.interviewer_company_name 
+                          ? `@${interview.interviewer_company_name}` 
+                          : "Technical Interview"}
                       </h3>
                       <p className="text-sm text-slate-400 mt-1">
-                        with {interview.interviewer_clerk_id === profile?.clerk_user_id ? "Candidate" : "Interviewer"}
+                        Interview with {interview.interviewer_clerk_id === profile?.clerk_user_id ? "Candidate" : "Interviewer"}
                       </p>
                     </div>
                     <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold whitespace-nowrap ${

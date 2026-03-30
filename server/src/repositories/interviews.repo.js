@@ -20,6 +20,9 @@ const INTERVIEW_SELECT = `
 		title,
 		slug,
 		difficulty
+	),
+	interviewer_profile:user_profiles!interviews_interviewer_clerk_id_fkey (
+		company_name
 	)
 `;
 

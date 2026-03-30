@@ -1060,6 +1060,36 @@ const Interview = () => {
             </div>
           </div>
 
+          {/* Interview Details Panel */}
+          <div className="flex justify-center mb-4">
+            <div className="inline-flex items-center gap-6 rounded-lg border border-white/10 bg-slate-900/60 backdro-blur px-6 py-3 text-sm">
+              {interviewData?.interviewer_company_name && (
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400">🏢</span>
+                  <span className="font-medium text-slate-200">
+                    <span className="text-emerald-400">@{interviewData.interviewer_company_name}</span>
+                  </span>
+                </div>
+              )}
+              {interviewData?.room_id && (
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400">🔑</span>
+                  <span className="font-mono text-xs text-slate-300">
+                    {interviewData.room_id.substring(0, 16)}...
+                  </span>
+                </div>
+              )}
+              {problemData?.title && (
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400">❓</span>
+                  <span className="font-medium text-slate-200 truncate max-w-xs">
+                    {problemData.title}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="flex flex-1 flex-col gap-4 sm:gap-6 md:flex-row">
             {/* Interviewer Video */}
             <div className="relative flex-1 overflow-hidden rounded-2xl border border-white/10 bg-slate-900/70 shadow-2xl shadow-slate-900/40">

@@ -113,6 +113,9 @@ const StaffPublicProfile = () => {
               {/* Info */}
               <div className="flex-1 text-center sm:text-left">
                 <h1 className="text-3xl font-bold">{staffProfile.display_name}</h1>
+                {staffProfile.company_name && (
+                  <p className="mt-1 text-lg font-medium text-emerald-400">@{staffProfile.company_name}</p>
+                )}
                 <p className="mt-2 text-slate-400">{staffProfile.bio || 'No bio provided'}</p>
                 <p className="mt-1 text-xs text-slate-500">
                   Member since {new Date(staffProfile.created_at).toLocaleDateString()}

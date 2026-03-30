@@ -67,9 +67,14 @@ export const updateUserProfileService = async (clerkUserId, updateData) => {
       "username",
     ];
 
-    // Allow app_role update ONLY during onboarding (when app_role is NULL)
+    // Allow app_role and company_name update ONLY during onboarding (when app_role is NULL)
     if (currentProfile.app_role === null && updateData.app_role) {
       allowedFields = [...allowedFields, "app_role"];
+      
+      // For staff, also allow company_name during onboarding
+      if (updateData.app_role === 'staff' && updateData.company_name) {
+        allowedFields = [...allowedFields, "company_name"];
+      }
     }
 
     const sanitizedData = {};

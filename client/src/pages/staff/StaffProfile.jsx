@@ -100,6 +100,9 @@ const StaffProfile = () => {
                 {/* Info */}
                 <div className="mb-6 space-y-2 text-center">
                   <h2 className="text-2xl font-bold">{profile?.display_name}</h2>
+                  {profile?.company_name && (
+                    <p className="text-sm font-medium text-emerald-400">@{profile.company_name}</p>
+                  )}
                   <p className="text-sm text-slate-400">{profile?.email}</p>
                   <p className="text-xs text-slate-500">
                     Member since {new Date(profile?.created_at).toLocaleDateString()}

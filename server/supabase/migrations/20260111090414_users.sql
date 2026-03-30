@@ -25,6 +25,9 @@ CREATE TABLE public.user_profiles (
     -- App-level role (user or staff)
     app_role app_role,
 
+    -- Company name (unique, lowercase, enforced null for users, optional for staff, before onboarding)
+  company_name TEXT UNIQUE CHECK (app_role = 'staff' OR company_name IS NULL),
+
     -- Competitive rating
     rating INT NOT NULL DEFAULT 1200
         CHECK (rating >= 0),
@@ -68,6 +71,24 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+--------------------------------------------------------------------------------
+-- Trigger Function to convert company_name to lowercase
+--------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.lowercase_company_name()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.company_name IS NOT NULL THEN
+        NEW.company_name = LOWER(TRIM(NEW.company_name));
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_lowercase_company_name
+BEFORE INSERT OR UPDATE ON public.user_profiles
+FOR EACH ROW
+EXECUTE FUNCTION public.lowercase_company_name();
 
 --------------------------------------------------------------------------------
 -- Enable Row Level Security

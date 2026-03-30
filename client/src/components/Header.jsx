@@ -33,10 +33,10 @@ const Header = () => {
   const menuItems = isStaff
     ? [
         { label: "Dashboard", path: "/staff/dashboard" },
-        { label: "Profile", path: "/staff/profile" },
         { label: "My Contests", path: "/staff/contests" },
         { label: "My Interviews", path: "/staff/interviews" },
         { label: "Problems", path: "/problems" },
+        { label: "Profile", path: "/staff/profile" },
         { label: "/health", path: "/judge0-health" },
       ]
     : [

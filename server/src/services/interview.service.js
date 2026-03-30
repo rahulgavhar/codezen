@@ -85,6 +85,7 @@ function formatInterview(interview) {
 		recording_url: interview.recording_url,
 		created_at: interview.created_at,
 		problem: interview.problem || null,
+		interviewer_company_name: interview.interviewer_profile?.company_name || null,
 	};
 }
 

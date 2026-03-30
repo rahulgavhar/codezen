@@ -14,7 +14,7 @@ const SharedScreen = ({ onClose, videoRef }) => {
   return (
     <div className="flex h-full flex-col bg-slate-950 text-slate-50">
       {/* Header */}
-      <header className="flex items-center justify-between border-b border-white/10 bg-slate-900/80 px-4 py-2 backdrop-blur flex-shrink-0">
+      <header className="flex items-center justify-between border-b border-white/10 bg-slate-900/80 px-4 py-2 backdrop-blur shrink-0">
         <div className="flex items-center gap-3">
           {onClose && (
             <button
