@@ -35,7 +35,9 @@ CREATE TABLE public.contest_submissions (
   source_code TEXT NOT NULL,
   error_message TEXT,
 
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  
+  leaderboard_processed BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 --------------------------------------------------------------------------------
@@ -57,6 +59,17 @@ ON public.contest_submissions (contest_problem_id, submitted_at DESC);
 CREATE INDEX idx_cs_pending
 ON public.contest_submissions (submitted_at ASC)
 WHERE verdict = 'pending';
+
+CREATE INDEX idx_cs_accepted
+ON public.contest_submissions (contest_id, submitted_at DESC)
+WHERE verdict = 'accepted';
+
+CREATE INDEX idx_cs_leaderboard_unprocessed
+ON public.contest_submissions (contest_id, submitted_at DESC)
+WHERE leaderboard_processed = FALSE;
+
+CREATE INDEX idx_cs_created_at
+ON public.contest_submissions (created_at DESC);
 
 --------------------------------------------------------------------------------
 -- Validation: contest timing

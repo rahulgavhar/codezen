@@ -178,9 +178,8 @@ class Main {
     if (socket && !isReadOnly) {
       clearTimeout(codeChangeTimeoutRef.current);
       codeChangeTimeoutRef.current = setTimeout(() => {
-        socket.emit("code-changed", {
+        socket.emit("code-change", {
           interviewId,
-          from: socket.id,
           code: newCode,
           language,
         });

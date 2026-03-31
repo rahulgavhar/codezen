@@ -12,9 +12,24 @@ CREATE TABLE public.contest_problems (
     REFERENCES public.problems(id)
     ON DELETE CASCADE,
 
-  -- Problem code (A, B, C...)
-  code TEXT NOT NULL
-    CHECK (char_length(code) BETWEEN 1 AND 5),
+  -- Problem content (snapshot)
+  title TEXT NOT NULL
+    CHECK (char_length(title) BETWEEN 5 AND 150),
+
+  description TEXT NOT NULL,
+
+  gemini_description TEXT,
+
+  input_format TEXT,
+
+  output_format TEXT,
+
+  constraints TEXT,
+
+  -- Execution limits
+  time_limit_ms INT DEFAULT 2000,
+
+  memory_limit_mb INT DEFAULT 256,
 
   -- Order in contest
   display_order INT NOT NULL
@@ -27,7 +42,6 @@ CREATE TABLE public.contest_problems (
   created_at timestamptz NOT NULL DEFAULT now(),
 
   -- Constraints
-  UNIQUE (contest_id, code),
   UNIQUE (contest_id, display_order),
   UNIQUE (contest_id, problem_id)
 );
@@ -47,6 +61,10 @@ ON public.contest_problems (contest_id, display_order);
 -- Scoring queries
 CREATE INDEX idx_contest_problems_points
 ON public.contest_problems (contest_id, points DESC);
+
+-- Problem reference (for analytics)
+CREATE INDEX idx_contest_problems_problem
+ON public.contest_problems (problem_id);
 
 --------------------------------------------------------------------------------
 -- Validation: prevent modification after contest ends
@@ -135,3 +153,10 @@ WITH CHECK (
       )
   )
 );
+
+--------------------------------------------------------------------------------
+-- Column Comments
+--------------------------------------------------------------------------------
+
+COMMENT ON COLUMN public.contest_problems.gemini_description IS 'AI-generated description of the problem from Gemini API';
+COMMENT ON TABLE public.contest_problems IS 'Snapshot of problem content for a specific contest, allowing problems to evolve over time while keeping contest context frozen';

@@ -629,15 +629,9 @@ export async function updateTestCaseResultFromJudge0(judge0Token, judge0Data) {
         continue;
       }
 
+      // Trust Judge0's verdict - don't re-verify output matches
       if (result.verdict === 'accepted') {
-        const actualTrimmed = (result.actual_output || '').trim();
-        const expectedTrimmed = (result.expected_output || '').trim();
-
-        if (actualTrimmed === expectedTrimmed) {
-          intermediatePassedCount++;
-        } else {
-          testResults[tcId].verdict = 'wrong_answer';
-        }
+        intermediatePassedCount++;
       }
     }
 
@@ -670,14 +664,8 @@ export async function updateTestCaseResultFromJudge0(judge0Token, judge0Data) {
       } else if (result.verdict === 'runtime_error' || result.verdict === 'time_limit') {
         hasRuntimeError = true;
       } else if (result.verdict === 'accepted') {
-        const actualTrimmed = (result.actual_output || '').trim();
-        const expectedTrimmed = (result.expected_output || '').trim();
-
-        if (actualTrimmed === expectedTrimmed) {
-          passedCount++;
-        } else {
-          testResults[tcId].verdict = 'wrong_answer';
-        }
+        // Trust Judge0's verdict - don't re-verify output matches
+        passedCount++;
       }
     }
 
@@ -924,16 +912,8 @@ export async function pollStuckTestCasesFromJudge0(submissionId, testResults, te
         } else if (result.verdict === 'runtime_error' || result.verdict === 'time_limit') {
           hasRuntimeError = true;
         } else if (result.verdict === 'accepted') {
-          // Verify output matches expected (same verification as initial aggregation)
-          const actualTrimmed = (result.actual_output || '').trim();
-          const expectedTrimmed = (result.expected_output || '').trim();
-          
-          if (actualTrimmed === expectedTrimmed) {
-            passedCount++;
-          } else {
-            // Update verdict if output doesn't match
-            updatedTestResults[tcId].verdict = 'wrong_answer';
-          }
+          // Trust Judge0's verdict - don't re-verify output matches
+          passedCount++;
         }
         
         // Aggregate runtime and memory

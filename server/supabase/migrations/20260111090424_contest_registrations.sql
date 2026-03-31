@@ -11,8 +11,6 @@ CREATE TABLE public.contest_registrations (
     REFERENCES public.user_profiles(clerk_user_id)
     ON DELETE CASCADE,
 
-  registered_at timestamptz NOT NULL DEFAULT now(),
-
   PRIMARY KEY (contest_id, clerk_user_id)
 );
 
@@ -27,10 +25,6 @@ ON public.contest_registrations (contest_id);
 -- User's contests
 CREATE INDEX idx_contest_registrations_user
 ON public.contest_registrations (clerk_user_id);
-
--- Recent registrations (admin / analytics)
-CREATE INDEX idx_contest_registrations_recent
-ON public.contest_registrations (contest_id, registered_at DESC);
 
 --------------------------------------------------------------------------------
 -- Validation: timing + capacity
