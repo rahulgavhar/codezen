@@ -4,6 +4,46 @@ import { FaPlay } from "react-icons/fa";
 import axiosInstance from "../lib/axios";
 import { useUser } from "@clerk/clerk-react";
 
+function decodeBase64IfNeeded(data) {
+  if (!data) return data;
+  if (typeof data !== 'string') return data;
+  
+  const trimmed = data.trim();
+  if (!trimmed) return data;
+  
+  const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+  if (!base64Regex.test(trimmed)) {
+    return data;
+  }
+  
+  if (trimmed.length % 4 !== 0) {
+    return data;
+  }
+  
+  try {
+    const decoded = atob(trimmed);
+    
+    let controlCharCount = 0;
+    for (let i = 0; i < decoded.length; i++) {
+      const charCode = decoded.charCodeAt(i);
+      if (charCode < 32 && charCode !== 9 && charCode !== 10 && charCode !== 13) {
+        controlCharCount++;
+      }
+      if (charCode === 0) {
+        return data;
+      }
+    }
+    
+    if (controlCharCount > decoded.length * 0.1) {
+      return data;
+    }
+    
+    return decoded;
+  } catch (err) {
+    return data;
+  }
+}
+
 const CodeEditor = ({ onClose, problemData, socket, interviewId, role }) => {
   const { user, isSignedIn } = useUser();
 
@@ -272,7 +312,7 @@ class Main {
       });
 
       const result = response.data;
-      const actualOutput = (result.stdout || "").trim();
+      const actualOutput = decodeBase64IfNeeded(result.stdout || "").trim();
       const expectedOutput = (sample.output || "").trim();
       const passed = actualOutput === expectedOutput && result.verdict === "accepted";
 
@@ -282,7 +322,7 @@ class Main {
         cases: [
           {
             input: sample.input,
-            expected: sample.output,
+            expected: expectedOutput,
             output: actualOutput,
             passed: passed,
             verdict: result.verdict,
@@ -338,7 +378,7 @@ class Main {
 
       console.log(`Submission created: ${submissionId}, initial verdict: ${submissionData.verdict}`);
 
-      const terminalVerdicts = ["accepted", "wrong_answer", "compilation_error", "runtime_error", "time_limit", "error"];
+      const terminalVerdicts = ["accepted", "wrong_answer", "compilation_error", "runtime_error", "time_limit", "error", "internal_error"];
 
       while (!terminalVerdicts.includes(submissionData.verdict)) {
         const elapsedTime = Date.now() - startTime;
@@ -385,8 +425,8 @@ class Main {
               testCases.push({
                 input_path: result.input_path || "",
                 output_path: result.output_path || "",
-                expected: result.expected_output || "",
-                output: result.actual_output || "",
+                expected: decodeBase64IfNeeded(result.expected_output) || "",
+                output: decodeBase64IfNeeded(result.actual_output) || "",
                 passed: result.verdict === "accepted",
                 verdict: result.verdict || "unknown",
                 runtime: result.runtime_ms || null,
@@ -428,8 +468,8 @@ class Main {
           testCases.push({
             input_path: result.input_path || "",
             output_path: result.output_path || "",
-            expected: result.expected_output || "",
-            output: result.actual_output || "",
+            expected: decodeBase64IfNeeded(result.expected_output) || "",
+            output: decodeBase64IfNeeded(result.actual_output) || "",
             passed: result.verdict === "accepted",
             verdict: result.verdict || "unknown",
             runtime: result.runtime_ms || null,

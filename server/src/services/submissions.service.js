@@ -640,12 +640,48 @@ export async function updateTestCaseResultFromJudge0(judge0Token, judge0Data) {
     if (!allTestCasesJudged) {
       console.log(`  → Updating with intermediate results (not all tests judged yet)`);
 
+      // Calculate intermediate verdict based on what we've seen so far
+      let intermediateVerdict = 'pending'; // Default: still waiting
+      let hasCompilationError = false;
+      let hasRuntimeError = false;
+      let hasWrongAnswer = false;
+      let hasSubmissionError = false;
+
+      for (const [tcId, result] of Object.entries(testResults)) {
+        if (!result.verdict || result.verdict === 'pending') {
+          continue;
+        }
+        if (result.verdict === 'compilation_error') {
+          hasCompilationError = true;
+        } else if (result.verdict === 'runtime_error' || result.verdict === 'time_limit') {
+          hasRuntimeError = true;
+        } else if (result.verdict === 'wrong_answer') {
+          hasWrongAnswer = true;
+        } else if (result.verdict === 'error') {
+          hasSubmissionError = true;
+        }
+      }
+
+      // Determine intermediate verdict priority: errors > failures
+      if (hasSubmissionError) {
+        intermediateVerdict = 'internal_error';
+      } else if (hasCompilationError) {
+        intermediateVerdict = 'compilation_error';
+      } else if (hasRuntimeError) {
+        intermediateVerdict = 'runtime_error';
+      } else if (hasWrongAnswer) {
+        intermediateVerdict = 'wrong_answer';
+      }
+
+      console.log(`  → Intermediate verdict: ${intermediateVerdict}, ${intermediatePassedCount}/${nonPendingTests} passed so far`);
+
       const intermediateUpdate = await submissionsRepo.updateSubmissionVerdict(submission.id, {
         test_results: testResults,
         test_cases_passed: intermediatePassedCount,
+        verdict: intermediateVerdict, // Update verdict so UI can see progress
       });
 
-      console.log(`  → Submission updated: test results updated, passed=${intermediateUpdate.test_cases_passed}/${totalTests}`);
+      console.log(`  → Submission updated: verdict=${intermediateUpdate.verdict}, passed=${intermediateUpdate.test_cases_passed}/${totalTests}`);
       return intermediateUpdate;
     }
 
