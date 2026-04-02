@@ -2,6 +2,7 @@ import express from 'express';
 const router = express.Router();
 
 import * as submissionsService from '../services/submissions.service.js';
+import * as judge0Service from '../services/judge0.service.js';
 
 // Map to track submissions waiting for stuck test polling
 // Key: submissionId, Value: { testCasesTotal, lastPollTime }
@@ -24,10 +25,19 @@ router.put('/judge0', async (req, res) => {
 
     console.log(`Webhook received for Judge0 token: ${judge0Data.token}`);
 
+    // Fetch latest submission details directly from Judge0 with base64_encoded=false.
+    // Fallback to webhook payload if Judge0 fetch fails.
+    let resolvedJudge0Data = judge0Data;
+    try {
+      resolvedJudge0Data = await judge0Service.getSubmissionFromJudge0(judge0Data.token);
+    } catch (fetchErr) {
+      console.warn(`Failed to fetch Judge0 details for token ${judge0Data.token}, using webhook payload:`, fetchErr.message);
+    }
+
     // First, try to find as a test case result (problem-based submissions)
     let updatedSubmission = await submissionsService.updateTestCaseResultFromJudge0(
       judge0Data.token,
-      judge0Data
+      resolvedJudge0Data
     );
 
     // If not found as test case, it might be an IDE submission with single judge0_token
@@ -40,7 +50,7 @@ router.put('/judge0', async (req, res) => {
         // Update submission with Judge0 results (old flow for IDE)
         updatedSubmission = await submissionsService.updateSubmissionFromJudge0(
           judge0Data.token,
-          judge0Data
+          resolvedJudge0Data
         );
       }
     }

@@ -5,56 +5,6 @@ import Editor from "@monaco-editor/react";
 import axiosInstance from "../lib/axios";
 import { FaPlay } from "react-icons/fa";
 
-function decodeBase64IfNeeded(data) {
-  if (!data) return data;
-  if (typeof data !== 'string') return data;
-  const trimmed = data.trim();
-  if (!trimmed) return data;
-
-  let normalized = trimmed.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
-  const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
-  if (!base64Regex.test(normalized)) {
-    return data;
-  }
-
-  const remainder = normalized.length % 4;
-  if (remainder === 1) {
-    return data;
-  }
-  if (remainder > 0) {
-    normalized += "=".repeat(4 - remainder);
-  }
-  
-  try {
-    const binary = atob(normalized);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    const decoded = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-    
-    // Verify decoded output is valid text
-    let controlCharCount = 0;
-    for (let i = 0; i < decoded.length; i++) {
-      const charCode = decoded.charCodeAt(i);
-      if (charCode < 32 && charCode !== 9 && charCode !== 10 && charCode !== 13) {
-        controlCharCount++;
-      }
-      if (charCode === 0) {
-        return data;
-      }
-    }
-    
-    if (controlCharCount > decoded.length * 0.1) {
-      return data;
-    }
-    
-    return decoded;
-  } catch (err) {
-    return data;
-  }
-}
-
 const ProblemDetail = () => {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -293,7 +243,7 @@ class Main {
       });
 
       // Decode output if needed
-      const actualOutput = decodeBase64IfNeeded(result.stdout || "").trim();
+      const actualOutput = (result.stdout || "").trim();
       const expectedOutput = (sample.output || "").trim();
       const passed = actualOutput === expectedOutput && result.verdict === "accepted";
 
@@ -429,8 +379,8 @@ class Main {
               testCases.push({
                 input_path: result.input_path || "",
                 output_path: result.output_path || "",
-                expected: decodeBase64IfNeeded(result.expected_output) || "",
-                output: decodeBase64IfNeeded(result.actual_output) || "",
+                expected: result.expected_output || "",
+                output: result.actual_output || "",
                 passed: result.verdict === "accepted",
                 verdict: result.verdict || "unknown",
                 runtime: result.runtime_ms || null,
@@ -484,8 +434,8 @@ class Main {
             partialCases.push({
               input_path: result.input_path || "",
               output_path: result.output_path || "",
-              expected: decodeBase64IfNeeded(result.expected_output) || "",
-              output: decodeBase64IfNeeded(result.actual_output) || "",
+              expected: result.expected_output || "",
+              output: result.actual_output || "",
               passed: result.verdict === "accepted",
               verdict: result.verdict || "unknown",
               runtime: result.runtime_ms || null,
@@ -519,8 +469,8 @@ class Main {
           testCases.push({
             input_path: result.input_path || "",
             output_path: result.output_path || "",
-            expected: decodeBase64IfNeeded(result.expected_output) || "",
-            output: decodeBase64IfNeeded(result.actual_output) || "",
+            expected: result.expected_output || "",
+            output: result.actual_output || "",
             passed: result.verdict === "accepted",
             verdict: result.verdict || "unknown",
             runtime: result.runtime_ms || null,

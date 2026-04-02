@@ -6,61 +6,6 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import axiosInstance from "../lib/axios";
 
-/**
- * Safely decode base64 if the string appears to be base64 encoded
- * @param {string} data - Data to decode
- * @returns {string} Decoded data or original if not base64
- */
-function decodeBase64IfNeeded(data) {
-  if (!data || typeof data !== 'string') return data;
-  
-  // Trim whitespace first
-  const trimmed = data.trim();
-  if (!trimmed) return data;
-  
-  // Check if data looks like base64: contains only valid base64 characters
-  // Base64 uses: A-Z, a-z, 0-9, +, /, and = for padding
-  const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
-  
-  // If doesn't match base64 pattern, return original
-  if (!base64Regex.test(trimmed)) {
-    return data;
-  }
-  
-  // Base64 length must be multiple of 4 (with padding)
-  if (trimmed.length % 4 !== 0) {
-    return data;
-  }
-  
-  try {
-    // Try to decode
-    const decoded = atob(trimmed);
-    
-    // Check if decoded result looks like valid text
-    // Allow: printable ASCII (32-126), tab (9), newline (10), carriage return (13)
-    // Also allow extended ASCII for UTF-8
-    let validText = true;
-    for (let i = 0; i < Math.min(decoded.length, 100); i++) {
-      const code = decoded.charCodeAt(i);
-      // Allow: tab, newline, CR, and printable ASCII + extended ASCII
-      const isValid = (code === 9 || code === 10 || code === 13) || (code >= 32 && code <= 126) || code >= 128;
-      if (!isValid) {
-        validText = false;
-        break;
-      }
-    }
-    
-    // If it looks like binary data, return original
-    if (!validText) {
-      return data;
-    }
-    
-    return decoded;
-  } catch (err) {
-    return data;
-  }
-}
-
 const Ide = () => {
   const navigate = useNavigate();
   const profile = useSelector((state) => state.user?.profile);
@@ -185,27 +130,19 @@ class Main {
         const submission = response.data;
 
         if (submission.verdict !== "pending") {
-          // Judging complete - decode base64 outputs
-          const decodedStdout = decodeBase64IfNeeded(submission.stdout);
-          const decodedStderr = decodeBase64IfNeeded(submission.stderr);
-          const decodedCompileOutput = decodeBase64IfNeeded(submission.compile_output);
-          
           console.log('[IDE Poll] Submission complete:', {
             verdict: submission.verdict,
-            stdout_raw: submission.stdout?.substring(0, 50),
-            stdout_decoded: decodedStdout?.substring(0, 50),
-            stderr_raw: submission.stderr?.substring(0, 50),
-            stderr_decoded: decodedStderr?.substring(0, 50),
-            compile_raw: submission.compile_output?.substring(0, 50),
-            compile_decoded: decodedCompileOutput?.substring(0, 50),
+            stdout: submission.stdout?.substring(0, 50),
+            stderr: submission.stderr?.substring(0, 50),
+            compile_output: submission.compile_output?.substring(0, 50),
           });
           
           setVerdict(submission.verdict);
           setRuntime(submission.runtime_ms);
           setMemory(submission.memory_kb);
-          setStdout(decodedStdout || "");
-          setStderr(decodedStderr || "");
-          setCompileOutput(decodedCompileOutput || "");
+          setStdout(submission.stdout || "");
+          setStderr(submission.stderr || "");
+          setCompileOutput(submission.compile_output || "");
           setIsLoading(false);
           clearInterval(pollInterval);
         }

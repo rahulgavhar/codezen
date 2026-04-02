@@ -80,6 +80,9 @@ export async function getSubmissionFromJudge0(token) {
     const response = await axios.get(
       `${ENV.JUDGE_SERVER_URL}/submissions/${token}`,
       {
+        params: {
+          base64_encoded: false,
+        },
         headers: {
           'X-Auth-Token': ENV.JUDGE_AUTH_TOKEN,
         },

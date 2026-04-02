@@ -387,10 +387,9 @@ export async function runSampleTest(clerkUserId, problemId, language, code, samp
 
     console.log(`Judge0 polling completed. Status: ${judge0Data.status?.id}, Attempts: ${attempts}`);
 
-    // Decode base64 outputs
-    const stdout = decodeBase64IfNeeded(judge0Data.stdout);
-    const stderr = decodeBase64IfNeeded(judge0Data.stderr);
-    const compileOutput = decodeBase64IfNeeded(judge0Data.compile_output);
+    const stdout = judge0Data.stdout;
+    const stderr = judge0Data.stderr;
+    const compileOutput = judge0Data.compile_output;
 
     // Map Judge0 status to verdict
     const verdictMap = {
@@ -446,69 +445,6 @@ export async function updateSubmissionVerdict(submissionId, updateData) {
  */
 export async function getUserSubmissionStats(clerkUserId) {
   return await submissionsRepo.getUserSubmissionStats(clerkUserId);
-}
-
-/**
- * Decode base64 string if needed (Judge0 returns base64-encoded output)
- * @param {string} data - Data that may be base64 encoded
- * @returns {string} Decoded string or original data if not base64
- */
-function decodeBase64IfNeeded(data) {
-  if (!data) return data;
-  if (typeof data !== 'string') return data;
-  const trimmed = data.trim();
-  if (!trimmed) return data;
-
-  // Normalize common variants for large payloads:
-  // - remove line wraps/whitespace
-  // - convert URL-safe base64 to standard
-  let normalized = trimmed.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
-
-  const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
-  if (!base64Regex.test(normalized)) {
-    return data;
-  }
-
-  const remainder = normalized.length % 4;
-  if (remainder === 1) {
-    return data;
-  }
-  if (remainder > 0) {
-    normalized += '='.repeat(4 - remainder);
-  }
-  
-  try {
-    const decoded = Buffer.from(normalized, 'base64').toString('utf-8');
-    
-    // Third check: verify the decoded output is valid text and looks reasonable
-    // Check that decoded doesn't contain excessive control characters (except newlines/tabs/CR)
-    let controlCharCount = 0;
-    let nullByteFound = false;
-    
-    for (let i = 0; i < decoded.length; i++) {
-      const charCode = decoded.charCodeAt(i);
-      // Count control characters (0-31) except 9 (tab), 10 (newline), 13 (carriage return)
-      if (charCode < 32 && charCode !== 9 && charCode !== 10 && charCode !== 13) {
-        controlCharCount++;
-      }
-      // Check for null bytes (often a sign of binary data)
-      if (charCode === 0) {
-        nullByteFound = true;
-        break;
-      }
-    }
-    
-    // If null byte found or too many control characters, it's likely binary/gibberish.
-    if (nullByteFound || controlCharCount > decoded.length * 0.1) {
-      return data;
-    }
-    
-    return decoded;
-  } catch (err) {
-    // If decode fails, return original data
-    console.warn(`Failed to decode base64: ${err.message}`);
-    return data;
-  }
 }
 
 // Serialize webhook updates per submission to avoid concurrent overwrite races.
@@ -580,9 +516,9 @@ export async function updateTestCaseResultFromJudge0(judge0Token, judge0Data) {
       return null;
     }
 
-    const stdout = decodeBase64IfNeeded(judge0Data.stdout);
-    const stderr = decodeBase64IfNeeded(judge0Data.stderr);
-    const compileOutput = decodeBase64IfNeeded(judge0Data.compile_output);
+    const stdout = judge0Data.stdout;
+    const stderr = judge0Data.stderr;
+    const compileOutput = judge0Data.compile_output;
 
     const verdictMap = {
       1: 'pending',
@@ -799,22 +735,18 @@ export async function updateSubmissionFromJudge0(judge0Token, judge0Data) {
 
   const verdict = verdictMap[judge0Data.status?.id] || 'pending';
 
-  // Decode base64 outputs from Judge0
-  const stdout = decodeBase64IfNeeded(judge0Data.stdout);
-  const stderr = decodeBase64IfNeeded(judge0Data.stderr);
-  const compileOutput = decodeBase64IfNeeded(judge0Data.compile_output);
+  const stdout = judge0Data.stdout;
+  const stderr = judge0Data.stderr;
+  const compileOutput = judge0Data.compile_output;
 
-  console.log(`[updateSubmissionFromJudge0] Decoded Judge0 results:`, {
+  console.log(`[updateSubmissionFromJudge0] Judge0 results:`, {
     token: judge0Token,
     verdict,
-    stdout_raw_len: judge0Data.stdout?.length,
-    stdout_decoded_len: stdout?.length,
+    stdout_len: stdout?.length,
     stdout_sample: stdout?.substring(0, 50),
-    stderr_raw_len: judge0Data.stderr?.length,
-    stderr_decoded_len: stderr?.length,
+    stderr_len: stderr?.length,
     stderr_sample: stderr?.substring(0, 50),
-    compile_raw_len: judge0Data.compile_output?.length,
-    compile_decoded_len: compileOutput?.length,
+    compile_len: compileOutput?.length,
     compile_sample: compileOutput?.substring(0, 50),
   });
 
@@ -879,10 +811,9 @@ export async function pollStuckTestCasesFromJudge0(submissionId, testResults, te
       // Judge0 completed! Update with results
       console.log(`  [${tcId.substring(0, 8)}] ✓ Got result from Judge0 (status: ${judge0Data.status?.id})`);
       
-      // Decode outputs
-      const stdout = decodeBase64IfNeeded(judge0Data.stdout);
-      const stderr = decodeBase64IfNeeded(judge0Data.stderr);
-      const compileOutput = decodeBase64IfNeeded(judge0Data.compile_output);
+      const stdout = judge0Data.stdout;
+      const stderr = judge0Data.stderr;
+      const compileOutput = judge0Data.compile_output;
 
       // Map verdict
       const verdictMap = {
