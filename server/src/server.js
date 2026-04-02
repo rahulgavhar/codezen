@@ -21,6 +21,7 @@ import usersRoutes from "./routes/users.route.js";
 import submissionsRoutes from "./routes/submissions.route.js";
 import webhooksRoutes from "./routes/webhooks.route.js";
 import problemsRoutes from "./routes/problems.route.js";
+import contestsRoutes from "./routes/contests.route.js";
 import interviewsRoutes from "./routes/interviews.route.js";
 import interviewProblemsRoutes from "./routes/interview_problems.route.js";
 import { startVMSyncJob } from "./jobs/vmSync.job.js";
@@ -56,6 +57,8 @@ app.use("/api/health", (req, res) => {
 });
 // Problems Routes (public - no auth)
 app.use("/api/problems", problemsRoutes);
+// Contests Routes (with activity tracking)
+app.use("/api/contests", trackActivityAndStartVM, contestsRoutes);
 // Judge0 Health Route
 app.use("/api/judge0", judgeRoutes);
 // Webhooks Routes (no auth - Judge0 calls directly)
@@ -83,8 +86,9 @@ app.use((err, req, res, next) => {
   }
   
   // Handle other errors
-  res.status(500).json({
-    error: 'Internal Server Error',
+  const statusCode = err.statusCode || 500;
+  res.status(statusCode).json({
+    error: statusCode === 500 ? 'Internal Server Error' : 'Request Error',
     message: err.message || 'An unexpected error occurred',
   });
 });

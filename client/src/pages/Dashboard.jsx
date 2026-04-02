@@ -6,40 +6,70 @@ import Footer from "../components/Footer";
 import RatingGraph from "../components/RatingGraph";
 import axiosInstance from "../lib/axios";
 
-const upcomingContests = [
-  {
-    id: "001",
-    title: "Weekly Coding Sprint #42",
-    date: "Jan 12, 2026",
-    time: "10:00 AM PST",
-    participants: 1240,
-    difficulty: "Mixed",
-    status: "Open",
-  },
-  {
-    id: "002",
-    title: "Advanced Algorithms Challenge",
-    date: "Jan 15, 2026",
-    time: "2:00 PM PST",
-    participants: 856,
-    difficulty: "Hard",
-    status: "Registration",
-  },
-  {
-    id: "003",
-    title: "Beginner Friendly Bootcamp",
-    date: "Jan 18, 2026",
-    time: "9:00 AM PST",
-    participants: 2103,
-    difficulty: "Easy",
-    status: "Open",
-  },
-];
+const getContestStatus = (contest) => {
+  const now = new Date();
+  const start = new Date(contest.start_time);
+  const end = new Date(contest.end_time);
+
+  if (now < start) return "Upcoming";
+  if (now >= start && now < end) return "Live";
+  return "Ended";
+};
+
+const formatDuration = (startTime, endTime) => {
+  const diffMs = Math.max(0, new Date(endTime) - new Date(startTime));
+  const totalMinutes = Math.floor(diffMs / (1000 * 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours === 0) return `${minutes}m`;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
+};
+
+const formatDateTime = (value) => {
+  return new Date(value).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
 
 const Dashboard = () => {
   const profile = useSelector((state) => state.user?.profile);
   const [scheduledInterviews, setScheduledInterviews] = useState([]);
   const [loadingInterviews, setLoadingInterviews] = useState(true);
+  const [upcomingContests, setUpcomingContests] = useState([]);
+  const [loadingContests, setLoadingContests] = useState(true);
+
+  useEffect(() => {
+    const fetchContests = async () => {
+      try {
+        setLoadingContests(true);
+
+        const response = await axiosInstance.get("/api/contests");
+        const allContests = Array.isArray(response.data) ? response.data : [];
+
+        const upcoming = allContests
+          .filter((contest) => getContestStatus(contest) === "Upcoming")
+          .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
+          .slice(0, 3);
+
+        setUpcomingContests(upcoming);
+      } catch (error) {
+        console.error("Failed to fetch dashboard contests:", error);
+        setUpcomingContests([]);
+      } finally {
+        setLoadingContests(false);
+      }
+    };
+
+    if (profile?.app_role !== "staff") {
+      fetchContests();
+    }
+  }, [profile?.app_role]);
 
   useEffect(() => {
     const fetchInterviews = async () => {
@@ -117,46 +147,58 @@ const Dashboard = () => {
               View all →
             </Link>
           </div>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {upcomingContests.map((contest) => (
-              <article
-                key={contest.id}
-                className="group relative overflow-hidden rounded-2xl border border-white/10 bg-slate-900/80 p-5 shadow-xl shadow-slate-900/30 backdrop-blur transition hover:border-cyan-400/40 hover:shadow-cyan-500/20"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <h3 className="text-lg font-semibold text-slate-50 group-hover:text-cyan-200">
-                    {contest.title}
-                  </h3>
-                  <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-xs font-semibold text-emerald-200 border border-emerald-400/30">
-                    {contest.status}
-                  </span>
-                </div>
-                <div className="mt-3 space-y-2 text-sm text-slate-300">
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-400">📅</span>
-                    <span>{contest.date} at {contest.time}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-400">👥</span>
-                    <span>{contest.participants} participants</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-400">⚡</span>
-                    <span>Difficulty: {contest.difficulty}</span>
-                  </div>
-                </div>
-                <Link
-                  to={`/contest/${contest.id}/info`}
-                  className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 transition hover:text-cyan-100"
+          {loadingContests ? (
+            <div className="text-slate-400">Loading contests...</div>
+          ) : upcomingContests.length === 0 ? (
+            <div className="rounded-2xl border border-white/10 bg-slate-900/80 p-8 text-center">
+              <p className="text-slate-400">No upcoming contests right now</p>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {upcomingContests.map((contest) => (
+                <article
+                  key={contest.id}
+                  className="group relative overflow-hidden rounded-2xl border border-white/10 bg-slate-900/80 p-5 shadow-xl shadow-slate-900/30 backdrop-blur transition hover:border-cyan-400/40 hover:shadow-cyan-500/20"
                 >
-                  Register now
-                  <span aria-hidden className="transition-transform group-hover:translate-x-1">
-                    →
-                  </span>
-                </Link>
-              </article>
-            ))}
-          </div>
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="text-lg font-semibold text-slate-50 group-hover:text-cyan-200">
+                      {contest.title}
+                    </h3>
+                    <span className="rounded-full bg-cyan-400/15 px-3 py-1 text-xs font-semibold text-cyan-200 border border-cyan-400/30">
+                      Upcoming
+                    </span>
+                  </div>
+                  <div className="mt-3 space-y-2 text-sm text-slate-300">
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400">📅</span>
+                      <span>{formatDateTime(contest.start_time)}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400">🕐</span>
+                      <span>{formatDuration(contest.start_time, contest.end_time)}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400">👥</span>
+                      <span>
+                        {contest.max_participants === null
+                          ? "Unlimited participants"
+                          : `Max ${contest.max_participants} participants`}
+                      </span>
+                    </div>
+                  </div>
+                  <Link
+                    to={`/contest/${contest.id}/info`}
+                    className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 transition hover:text-cyan-100"
+                  >
+                    View details
+                    <span aria-hidden className="transition-transform group-hover:translate-x-1">
+                      →
+                    </span>
+                  </Link>
+                </article>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* Scheduled Interviews */}

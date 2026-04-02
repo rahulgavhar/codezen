@@ -12,6 +12,7 @@ import Ide from "./pages/Ide.jsx";
 import AllContests from "./pages/contest/AllContests.jsx";
 import Contest from "./pages/contest/Contest.jsx";
 import OngoingContest from "./pages/contest/OngoingContest.jsx";
+import ContestProblemDetail from "./pages/contest/ContestProblemDetail.jsx";
 import CodeEditor from "./pages/CodeEditor.jsx";
 import Interview from "./pages/Interview.jsx";
 import MySubmissions from "./pages/MySubmissions.jsx";
@@ -94,6 +95,10 @@ function App() {
         <Route
           path="/contest/:id/ongoing"
           element={isSignedIn && profile?.app_role !== 'staff' ? <OngoingContest /> : <Navigate to="/" />}
+        />
+        <Route
+          path="/contest/:id/problem/:contestProblemId"
+          element={isSignedIn && profile?.app_role !== 'staff' ? <ContestProblemDetail /> : <Navigate to="/" />}
         />
         <Route
           path="/my-interviews"

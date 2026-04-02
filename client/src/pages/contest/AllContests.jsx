@@ -1,50 +1,34 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaPeopleGroup } from "react-icons/fa6";
 import Header from "../../components/Header";
 import Footer from "../../components/Footer";
 import GuestHeader from "../../components/GuestHeader";
 import { useUser } from "@clerk/clerk-react";
+import axiosInstance from "../../lib/axios";
 
+const PAGE_SIZE = 8;
 
-const sampleContests = [
-  {
-    id: 1,
-    title: "Weekly Challenge #42",
-    status: "Upcoming",
-    startTime: "2026-01-15T18:00:00",
-    duration: "2 hr",
-    participants: 0,
-    problems: 4,
-  },
-  {
-    id: 2,
-    title: "Biweekly Contest #18",
-    status: "Live",
-    startTime: "2026-01-08T14:00:00",
-    duration: "2.5 hr",
-    participants: 847,
-    problems: 5,
-  },
-  {
-    id: 3,
-    title: "Monthly Marathon",
-    status: "Ended",
-    startTime: "2025-12-20T10:00:00",
-    duration: "3 hr",
-    participants: 1523,
-    problems: 6,
-  },
-  {
-    id: 4,
-    title: "Algorithm Showdown",
-    status: "Ended",
-    startTime: "2025-12-10T16:00:00",
-    duration: "2 hr",
-    participants: 956,
-    problems: 4,
-  },
-];
+const getContestStatus = (contest) => {
+  const now = new Date();
+  const start = new Date(contest.start_time);
+  const end = new Date(contest.end_time);
+
+  if (now < start) return "Upcoming";
+  if (now >= start && now < end) return "Live";
+  return "Ended";
+};
+
+const formatDuration = (startTime, endTime) => {
+  const diffMs = Math.max(0, new Date(endTime) - new Date(startTime));
+  const totalMinutes = Math.floor(diffMs / (1000 * 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours === 0) return `${minutes}m`;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
+};
 
 const statusConfig = {
   Upcoming: {
@@ -69,12 +53,42 @@ const statusConfig = {
 const AllContests = () => {
   const navigate = useNavigate();
   const [filter, setFilter] = useState("All");
+  const [contests, setContests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
   const { isSignedIn } = useUser();
 
-  const filtered = sampleContests.filter((c) => {
-    if (filter === "All") return true;
-    return c.status === filter;
-  });
+  useEffect(() => {
+    const fetchContests = async () => {
+      try {
+        setLoading(true);
+        const response = await axiosInstance.get("/api/contests");
+        const data = Array.isArray(response.data) ? response.data : [];
+
+        const sorted = data.sort((a, b) => new Date(b.start_time) - new Date(a.start_time));
+        setContests(sorted);
+      } catch (error) {
+        console.error("Failed to load contests:", error);
+        setContests([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchContests();
+  }, []);
+
+  useEffect(() => {
+    setPage(1);
+  }, [filter]);
+
+  const filtered = useMemo(() => {
+    if (filter === "All") return contests;
+    return contests.filter((contest) => getContestStatus(contest) === filter);
+  }, [contests, filter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginatedContests = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const formatDate = (dateStr) => {
     const date = new Date(dateStr);
@@ -130,58 +144,100 @@ const AllContests = () => {
           </div>
         </header>
 
-        <section className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
-          {filtered.map((contest) => {
-            const config = statusConfig[contest.status];
-            return (
-              <article
-                key={contest.id}
-                className="group relative overflow-hidden rounded-2xl border border-white/10 bg-slate-900/80 p-5 shadow-xl shadow-slate-900/30 backdrop-blur transition hover:border-cyan-400/40 hover:shadow-cyan-500/20"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h2 className="text-lg font-semibold text-slate-50 group-hover:text-cyan-200">
-                      {contest.title}
-                    </h2>
-                    <p className="mt-1 text-xs text-slate-400">{formatDate(contest.startTime)}</p>
-                  </div>
-                  <span
-                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${config.badge}`}
+        {loading ? (
+          <section className="rounded-2xl border border-white/10 bg-slate-900/70 p-8 text-center text-sm text-slate-300">
+            Loading contests...
+          </section>
+        ) : (
+          <>
+            <section className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
+              {paginatedContests.map((contest) => {
+                const status = getContestStatus(contest);
+                const config = statusConfig[status];
+
+                return (
+                  <article
+                    key={contest.id}
+                    className="group relative overflow-hidden rounded-2xl border border-white/10 bg-slate-900/80 p-5 shadow-xl shadow-slate-900/30 backdrop-blur transition hover:border-cyan-400/40 hover:shadow-cyan-500/20"
                   >
-                    <span>{config.icon}</span>
-                    {contest.status}
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h2 className="text-lg font-semibold text-slate-50 group-hover:text-cyan-200">
+                          {contest.title}
+                        </h2>
+                        <p className="mt-1 text-xs text-slate-400">{formatDate(contest.start_time)}</p>
+                      </div>
+                      <span
+                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${config.badge}`}
+                      >
+                        <span>{config.icon}</span>
+                        {status}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-3 gap-3 text-xs">
+                      <div className="rounded-lg bg-white/5 px-3 py-2 flex flex-col items-center justify-center">
+                        <p className="text-slate-400">Duration</p>
+                        <p className="font-semibold text-slate-100">{formatDuration(contest.start_time, contest.end_time)}</p>
+                      </div>
+                      <div className="rounded-lg bg-white/5 px-3 py-2 flex flex-col items-center justify-center">
+                        <p className="text-slate-400">Rated</p>
+                        <p className="font-semibold text-slate-100">{contest.is_rated ? "Yes" : "No"}</p>
+                      </div>
+                      <div className="rounded-lg bg-white/5 px-3 py-2 flex flex-col items-center justify-center">
+                        <p className="text-slate-400"><FaPeopleGroup /></p>
+                        <p className="font-semibold text-slate-100">
+                          {contest.max_participants === null ? "Unlimited" : contest.max_participants}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => navigate(`/contest/${contest.id}/info`)}
+                      className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 transition hover:text-cyan-100"
+                    >
+                      {status === "Live" ? "Join Now" : status === "Upcoming" ? "View Contest" : "View Results"}
+                      <span aria-hidden className="transition-transform group-hover:translate-x-1">→</span>
+                    </button>
+                  </article>
+                );
+              })}
+
+              {!paginatedContests.length && (
+                <div className="col-span-full rounded-2xl border border-white/10 bg-slate-900/70 p-8 text-center text-sm text-slate-300">
+                  No contests found matching that filter.
+                </div>
+              )}
+            </section>
+
+            {filtered.length > 0 && (
+              <section className="mt-2 flex items-center justify-between">
+                <p className="text-xs text-slate-400">
+                  Showing {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                    disabled={page === 1}
+                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-cyan-400/60 disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-xs text-slate-300">
+                    Page {page} of {totalPages}
                   </span>
+                  <button
+                    onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                    disabled={page === totalPages}
+                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-cyan-400/60 disabled:opacity-50"
+                  >
+                    Next
+                  </button>
                 </div>
-
-                <div className="mt-4 grid grid-cols-3 gap-3 text-xs">
-                  <div className="rounded-lg bg-white/5 px-3 py-2 flex flex-col items-center justify-center">
-                    <p className="text-slate-400">Duration</p>
-                    <p className="font-semibold text-slate-100">{contest.duration}</p>
-                  </div>
-                  <div className="rounded-lg bg-white/5 px-3 py-2 flex flex-col items-center justify-center">
-                    <p className="text-slate-400">Problems</p>
-                    <p className="font-semibold text-slate-100">{contest.problems}</p>
-                  </div>
-                  <div className="rounded-lg bg-white/5 px-3 py-2 flex flex-col items-center justify-center">
-                    <p className="text-slate-400"><FaPeopleGroup /></p>
-                    <p className="font-semibold text-slate-100">{contest.participants}</p>
-                  </div>
-                </div>
-
-                <button className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 transition hover:text-cyan-100">
-                  {contest.status === "Live" ? "Join Now" : contest.status === "Upcoming" ? "Register" : "View Results"}
-                  <span aria-hidden className="transition-transform group-hover:translate-x-1">→</span>
-                </button>
-              </article>
-            );
-          })}
-
-          {!filtered.length && (
-            <div className="col-span-full rounded-2xl border border-white/10 bg-slate-900/70 p-8 text-center text-sm text-slate-300">
-              No contests found matching that filter.
-            </div>
-          )}
-        </section>
+              </section>
+            )}
+          </>
+        )}
       </main>
       <Footer />
     </div>

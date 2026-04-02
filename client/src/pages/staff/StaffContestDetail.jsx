@@ -16,10 +16,17 @@ const StaffContestDetail = () => {
   }
   const [contest, setContest] = useState(null);
   const [problems, setProblems] = useState([]);
-  const [submissions, setSubmissions] = useState([]);
+  const [registrants, setRegistrants] = useState([]);
+  const [registrantsPagination, setRegistrantsPagination] = useState({
+    page: 1,
+    limit: 10,
+    count: 0,
+    total: 0,
+    pages: 0,
+  });
+  const [registrantsLoading, setRegistrantsLoading] = useState(false);
+  const [registrantsPage, setRegistrantsPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [editMode, setEditMode] = useState(false);
-  const [formData, setFormData] = useState({});
 
   useEffect(() => {
     const fetchContestData = async () => {
@@ -29,15 +36,10 @@ const StaffContestDetail = () => {
         // Fetch contest
         const contestRes = await axiosInstance.get(`/api/contests/${contestId}`);
         setContest(contestRes.data);
-        setFormData(contestRes.data);
 
         // Fetch problems in contest
         const problemsRes = await axiosInstance.get(`/api/contests/${contestId}/problems`);
         setProblems(problemsRes.data);
-
-        // Fetch submissions
-        const submissionsRes = await axiosInstance.get(`/api/contests/${contestId}/submissions`);
-        setSubmissions(submissionsRes.data);
       } catch (error) {
         console.error('Error fetching contest:', error);
       } finally {
@@ -50,23 +52,36 @@ const StaffContestDetail = () => {
     }
   }, [contestId]);
 
-  const handleInputChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : value,
-    }));
-  };
+  useEffect(() => {
+    const fetchRegistrants = async () => {
+      try {
+        setRegistrantsLoading(true);
+        const registrantsRes = await axiosInstance.get(`/api/contests/${contestId}/registrants`, {
+          params: {
+            page: registrantsPage,
+            limit: 10,
+          },
+        });
 
-  const handleSave = async () => {
-    try {
-      await axiosInstance.put(`/api/contests/${contestId}`, formData);
-      setContest(formData);
-      setEditMode(false);
-    } catch (error) {
-      console.error('Error updating contest:', error);
+        setRegistrants(registrantsRes.data?.data || []);
+        setRegistrantsPagination(registrantsRes.data?.pagination || {
+          page: registrantsPage,
+          limit: 10,
+          count: 0,
+          total: 0,
+          pages: 0,
+        });
+      } catch (error) {
+        console.error('Error fetching contest registrants:', error);
+      } finally {
+        setRegistrantsLoading(false);
+      }
+    };
+
+    if (contestId) {
+      fetchRegistrants();
     }
-  };
+  }, [contestId, registrantsPage]);
 
   const getContestStatus = (c) => {
     if (!c) return 'upcoming';
@@ -128,72 +143,15 @@ const StaffContestDetail = () => {
               </div>
               <p className="mt-1 text-slate-400">{contest.description}</p>
             </div>
-            {!editMode && (
-              <button
-                onClick={() => setEditMode(true)}
-                className="rounded-lg bg-cyan-500/20 px-4 py-2 text-cyan-400 transition hover:bg-cyan-500/30"
-              >
-                Edit
-              </button>
-            )}
           </div>
 
           <div className="grid gap-8 lg:grid-cols-3">
             {/* Main Content */}
             <div className="lg:col-span-2 space-y-6">
-              {/* Edit Form */}
-              {editMode && (
-                <div className="rounded-lg border border-white/10 bg-white/5 p-6 backdrop-blur">
-                  <h2 className="mb-4 text-lg font-bold">Edit Contest</h2>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-slate-300">Title</label>
-                      <input
-                        type="text"
-                        name="title"
-                        value={formData.title}
-                        onChange={handleInputChange}
-                        className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-slate-50 focus:border-cyan-400 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-300">Description</label>
-                      <textarea
-                        name="description"
-                        value={formData.description}
-                        onChange={handleInputChange}
-                        rows="3"
-                        className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-slate-50 focus:border-cyan-400 focus:outline-none"
-                      />
-                    </div>
-                    <div className="flex gap-3">
-                      <button
-                        onClick={handleSave}
-                        className="flex-1 rounded-lg bg-cyan-500 px-4 py-2 font-medium text-white transition hover:bg-cyan-600"
-                      >
-                        Save
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditMode(false);
-                          setFormData(contest);
-                        }}
-                        className="flex-1 rounded-lg border border-white/10 px-4 py-2 font-medium transition hover:bg-white/5"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {/* Problems */}
               <div className="rounded-lg border border-white/10 bg-white/5 p-6 backdrop-blur">
                 <div className="mb-4 flex items-center justify-between">
                   <h2 className="text-lg font-bold">Problems ({problems.length})</h2>
-                  <button className="rounded-lg bg-cyan-500/20 px-3 py-1 text-xs text-cyan-400 transition hover:bg-cyan-500/30">
-                    Add Problem
-                  </button>
                 </div>
                 {problems.length === 0 ? (
                   <p className="text-slate-400">No problems added yet</p>
@@ -211,7 +169,6 @@ const StaffContestDetail = () => {
                               <p className="text-xs text-slate-500">{problem.points} points</p>
                             </div>
                           </div>
-                          <button className="text-red-400 hover:text-red-300">Remove</button>
                         </div>
                       </div>
                     ))}
@@ -219,38 +176,38 @@ const StaffContestDetail = () => {
                 )}
               </div>
 
-              {/* Recent Submissions */}
+              {/* Recent Registrants */}
               <div className="rounded-lg border border-white/10 bg-white/5 p-6 backdrop-blur">
-                <h2 className="mb-4 text-lg font-bold">Recent Submissions ({submissions.length})</h2>
-                {submissions.length === 0 ? (
-                  <p className="text-slate-400">No submissions yet</p>
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="text-lg font-bold">Recent Registrants ({registrantsPagination.total})</h2>
+                  <p className="text-xs text-slate-400">
+                    Page {registrantsPagination.page} of {registrantsPagination.pages || 1}
+                  </p>
+                </div>
+
+                {registrantsLoading ? (
+                  <p className="text-slate-400">Loading registrants...</p>
+                ) : registrants.length === 0 ? (
+                  <p className="text-slate-400">No registrants yet</p>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-white/10">
-                          <th className="text-left py-2 text-slate-400">User</th>
-                          <th className="text-left py-2 text-slate-400">Problem</th>
-                          <th className="text-left py-2 text-slate-400">Verdict</th>
-                          <th className="text-left py-2 text-slate-400">Time</th>
+                          <th className="text-left py-2 text-slate-400">Display Name</th>
+                          <th className="text-left py-2 text-slate-400">Username</th>
+                          <th className="text-left py-2 text-slate-400">User ID</th>
+                          <th className="text-left py-2 text-slate-400">Last Active</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {submissions.slice(0, 10).map((sub) => (
-                          <tr key={sub.id} className="border-b border-white/5 hover:bg-white/5">
-                            <td className="py-2">{sub.clerk_user_id}</td>
-                            <td className="py-2">-</td>
-                            <td className="py-2">
-                              <span className={`rounded px-2 py-1 text-xs ${
-                                sub.verdict === 'accepted' ? 'bg-emerald-500/20 text-emerald-400' :
-                                sub.verdict === 'pending' ? 'bg-amber-500/20 text-amber-400' :
-                                'bg-red-500/20 text-red-400'
-                              }`}>
-                                {sub.verdict}
-                              </span>
-                            </td>
+                        {registrants.map((registrant) => (
+                          <tr key={registrant.clerk_user_id} className="border-b border-white/5 hover:bg-white/5">
+                            <td className="py-2">{registrant.display_name || '—'}</td>
+                            <td className="py-2">{registrant.username || '—'}</td>
+                            <td className="py-2 font-mono text-xs">{registrant.clerk_user_id}</td>
                             <td className="py-2 text-xs text-slate-500">
-                              {new Date(sub.submitted_at).toLocaleTimeString()}
+                              {registrant.last_active_at ? new Date(registrant.last_active_at).toLocaleString() : '—'}
                             </td>
                           </tr>
                         ))}
@@ -258,6 +215,28 @@ const StaffContestDetail = () => {
                     </table>
                   </div>
                 )}
+
+                <div className="mt-4 flex items-center justify-between">
+                  <button
+                    onClick={() => setRegistrantsPage((prev) => Math.max(prev - 1, 1))}
+                    disabled={registrantsPagination.page <= 1 || registrantsLoading}
+                    className="rounded-lg border border-white/10 px-3 py-1 text-sm transition hover:bg-white/5 disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+
+                  <span className="text-xs text-slate-400">
+                    Showing {registrantsPagination.count} of {registrantsPagination.total}
+                  </span>
+
+                  <button
+                    onClick={() => setRegistrantsPage((prev) => prev + 1)}
+                    disabled={registrantsLoading || registrantsPagination.page >= (registrantsPagination.pages || 1)}
+                    className="rounded-lg border border-white/10 px-3 py-1 text-sm transition hover:bg-white/5 disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -294,11 +273,11 @@ const StaffContestDetail = () => {
                 <div className="space-y-3 text-sm">
                   <div className="flex justify-between">
                     <span className="text-slate-400">Registrations</span>
-                    <span className="font-medium">-</span>
+                    <span className="font-medium">{registrantsPagination.total}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Submissions</span>
-                    <span className="font-medium">{submissions.length}</span>
+                    <span className="text-slate-400">Current Page Size</span>
+                    <span className="font-medium">{registrantsPagination.count}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-400">Problems</span>

@@ -4,6 +4,44 @@ import { ENV } from '../config/env.config.js';
 import { supabase } from '../config/supabase.client.js';
 import { ensureVMReadyForExecution } from './vm.service.js';
 
+function decodeCppCompilationOutputIfNeeded(compileOutput, verdict, language) {
+  if (!compileOutput || verdict !== 'compilation_error' || language !== 'cpp') {
+    return compileOutput;
+  }
+
+  if (typeof compileOutput !== 'string') {
+    return compileOutput;
+  }
+
+  const trimmed = compileOutput.trim();
+  if (!trimmed) {
+    return compileOutput;
+  }
+
+  // Normalize base64 variants and line wraps.
+  let normalized = trimmed.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+  const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+
+  if (!base64Regex.test(normalized)) {
+    return compileOutput;
+  }
+
+  const remainder = normalized.length % 4;
+  if (remainder === 1) {
+    return compileOutput;
+  }
+  if (remainder > 0) {
+    normalized += '='.repeat(4 - remainder);
+  }
+
+  try {
+    const decoded = Buffer.from(normalized, 'base64').toString('utf-8');
+    return decoded || compileOutput;
+  } catch {
+    return compileOutput;
+  }
+}
+
 /**
  * Get all submissions for the current user with formatted data
  * @param {string} clerkUserId - Clerk user ID
@@ -396,7 +434,7 @@ export async function runSampleTest(clerkUserId, problemId, language, code, samp
 
     const stdout = judge0Data.stdout;
     const stderr = judge0Data.stderr;
-    const compileOutput = judge0Data.compile_output;
+    const compileOutputRaw = judge0Data.compile_output;
 
     // Map Judge0 status to verdict
     const verdictMap = {
@@ -417,6 +455,7 @@ export async function runSampleTest(clerkUserId, problemId, language, code, samp
     };
 
     const verdict = verdictMap[judge0Data.status?.id] || 'pending';
+    const compileOutput = decodeCppCompilationOutputIfNeeded(compileOutputRaw, verdict, language);
 
     console.log(`Sample test result: verdict=${verdict}, stdout length=${stdout?.length || 0}`);
 
@@ -525,7 +564,7 @@ export async function updateTestCaseResultFromJudge0(judge0Token, judge0Data) {
 
     const stdout = judge0Data.stdout;
     const stderr = judge0Data.stderr;
-    const compileOutput = judge0Data.compile_output;
+    const compileOutputRaw = judge0Data.compile_output;
 
     const verdictMap = {
       1: 'pending',
@@ -545,6 +584,11 @@ export async function updateTestCaseResultFromJudge0(judge0Token, judge0Data) {
     };
 
     const testVerdict = verdictMap[judge0Data.status?.id] || 'pending';
+    const compileOutput = decodeCppCompilationOutputIfNeeded(
+      compileOutputRaw,
+      testVerdict,
+      latestSubmission.language
+    );
 
     testResults[testCaseId] = {
       ...testResults[testCaseId],
@@ -777,7 +821,12 @@ export async function updateSubmissionFromJudge0(judge0Token, judge0Data) {
 
   const stdout = judge0Data.stdout;
   const stderr = judge0Data.stderr;
-  const compileOutput = judge0Data.compile_output;
+  const compileOutputRaw = judge0Data.compile_output;
+  const compileOutput = decodeCppCompilationOutputIfNeeded(
+    compileOutputRaw,
+    verdict,
+    submission.language
+  );
 
   console.log(`[updateSubmissionFromJudge0] Judge0 results:`, {
     token: judge0Token,
@@ -819,6 +868,9 @@ export async function pollStuckTestCasesFromJudge0(submissionId, testResults, te
     return null;
   }
 
+  const submission = await submissionsRepo.getSubmissionForTestCaseTracking(submissionId);
+  const submissionLanguage = submission?.language;
+
   // Find test cases still pending
   const stuckTestCases = [];
   for (const [tcId, result] of Object.entries(testResults)) {
@@ -853,7 +905,7 @@ export async function pollStuckTestCasesFromJudge0(submissionId, testResults, te
       
       const stdout = judge0Data.stdout;
       const stderr = judge0Data.stderr;
-      const compileOutput = judge0Data.compile_output;
+      const compileOutputRaw = judge0Data.compile_output;
 
       // Map verdict
       const verdictMap = {
@@ -872,6 +924,11 @@ export async function pollStuckTestCasesFromJudge0(submissionId, testResults, te
       };
 
       const verdict = verdictMap[judge0Data.status.id] || 'pending';
+      const compileOutput = decodeCppCompilationOutputIfNeeded(
+        compileOutputRaw,
+        verdict,
+        submissionLanguage
+      );
 
       // Update test result
       updates[tcId] = {

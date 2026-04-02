@@ -1,49 +1,321 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { useUser } from "@clerk/clerk-react";
 import { useSelector } from "react-redux";
 import Header from "../../components/Header";
 import Footer from "../../components/Footer";
+import axiosInstance from "../../lib/axios";
 
-const sampleProblems = [
-  { code: "A", title: "Warmup Arrays", submissions: 312 },
-  { code: "B", title: "Two Pointers", submissions: 287 },
-  { code: "C", title: "Greedy Gifts", submissions: 241 },
-  { code: "D", title: "Graph Paths", submissions: 198 },
-  { code: "E", title: "Segment Trees", submissions: 124 },
-  { code: "F", title: "Flow Network", submissions: 86 },
-];
+const toProblemCode = (index) => {
+  if (index < 26) {
+    return String.fromCharCode(65 + index);
+  }
+  return `P${index + 1}`;
+};
 
-const sampleSubmissions = [
-  { title: "Warmup Arrays", time: "12:10", verdict: "Accepted", language: "C++17" },
-  { title: "Two Pointers", time: "12:25", verdict: "Wrong Answer", language: "Python 3" },
-  { title: "Greedy Gifts", time: "12:50", verdict: "Accepted", language: "Java 17" },
-];
+const formatVerdictLabel = (value) => {
+  if (!value) return "Unknown";
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
 
-const sampleStandings = [
-  { rank: 1, handle: "bytefox", score: 600, solved: 6, penalty: 14 },
-  { rank: 2, handle: "algowiz", score: 560, solved: 5, penalty: 22 },
-  { rank: 3, handle: "devkiran", score: 520, solved: 5, penalty: 35 },
-  { rank: 4, handle: "theorycraft", score: 470, solved: 4, penalty: 40 },
-];
+const verdictTone = (verdict) => {
+  if (verdict === "accepted") return "text-emerald-400";
+  if (verdict === "pending") return "text-sky-300";
+  return "text-amber-300";
+};
+
+const formatSubmissionTime = (value) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const getContestStatus = (contest) => {
+  if (!contest?.start_time || !contest?.end_time) return "Upcoming";
+
+  const now = new Date();
+  const start = new Date(contest.start_time);
+  const end = new Date(contest.end_time);
+
+  if (now < start) return "Upcoming";
+  if (now >= start && now < end) return "Live";
+  return "Ended";
+};
+
+const formatCountdown = (targetDate) => {
+  const diff = Math.max(0, targetDate.getTime() - Date.now());
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const minutes = Math.floor((diff / (1000 * 60)) % 60);
+  const seconds = Math.floor((diff / 1000) % 60);
+
+  return [hours, minutes, seconds]
+    .map((v) => String(v).padStart(2, "0"))
+    .join(":");
+};
 
 const OngoingContest = () => {
   const navigate = useNavigate();
+  const { id } = useParams();
+  const { user } = useUser();
+  const hasEndPopupShownRef = useRef(false);
   const profile = useSelector((state) => state.user?.profile);
+  const [activeTab, setActiveTab] = useState("problems");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [contest, setContest] = useState(null);
+  const [countdownLabel, setCountdownLabel] = useState("Ends in");
+  const [countdown, setCountdown] = useState("--:--:--");
+  const [problems, setProblems] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
+  const [registrants, setRegistrants] = useState([]);
 
-  // Redirect staff users to staff dashboard
-  if (profile?.app_role === 'staff') {
-    return navigate('/staff/dashboard');
+  useEffect(() => {
+    hasEndPopupShownRef.current = false;
+  }, [id]);
+
+  useEffect(() => {
+    if (profile?.app_role === "staff") {
+      navigate("/staff/dashboard", { replace: true });
+    }
+  }, [navigate, profile?.app_role]);
+
+  useEffect(() => {
+    const fetchContestData = async () => {
+      try {
+        setLoading(true);
+        setError("");
+
+        const [contestRes, problemsRes, submissionsRes, registrantsRes] = await Promise.all([
+          axiosInstance.get(`/api/contests/${id}`),
+          axiosInstance.get(`/api/contests/${id}/problems`),
+          axiosInstance.get(`/api/contests/${id}/submissions`),
+          axiosInstance.get(`/api/contests/${id}/registrants`, {
+            params: { page: 1, limit: 50 },
+          }),
+        ]);
+
+        const incomingProblems = Array.isArray(problemsRes.data) ? problemsRes.data : [];
+        const mappedProblems = incomingProblems.map((problem, index) => ({
+          ...problem,
+          code: toProblemCode(index),
+        }));
+
+        setContest(contestRes.data || null);
+        setProblems(mappedProblems);
+        setSubmissions(Array.isArray(submissionsRes.data) ? submissionsRes.data : []);
+        setRegistrants(Array.isArray(registrantsRes.data?.data) ? registrantsRes.data.data : []);
+      } catch (err) {
+        console.error("Failed to load ongoing contest data:", err);
+        setError(err.response?.data?.message || "Failed to load ongoing contest data");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (id) {
+      fetchContestData();
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (!contest?.start_time || !contest?.end_time) {
+      return undefined;
+    }
+
+    const tick = () => {
+      const status = getContestStatus(contest);
+
+      if (status === "Upcoming") {
+        setCountdownLabel("Starts in");
+        setCountdown(formatCountdown(new Date(contest.start_time)));
+        return;
+      }
+
+      if (status === "Live") {
+        setCountdownLabel("Ends in");
+        setCountdown(formatCountdown(new Date(contest.end_time)));
+        return;
+      }
+
+      setCountdownLabel("Ended");
+      setCountdown("00:00:00");
+
+      if (!hasEndPopupShownRef.current) {
+        hasEndPopupShownRef.current = true;
+        alert("Contest has ended.");
+        navigate(`/contest/${id}/info`, { replace: true });
+      }
+    };
+
+    tick();
+    const intervalId = setInterval(tick, 1000);
+    return () => clearInterval(intervalId);
+  }, [contest, id, navigate]);
+
+  const submissionsByProblem = useMemo(() => {
+    const counts = new Map();
+    submissions.forEach((entry) => {
+      const key = entry.contest_problem_id;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    return counts;
+  }, [submissions]);
+
+  const mySubmissions = useMemo(() => {
+    if (!user?.id) {
+      return [];
+    }
+
+    return submissions
+      .filter((entry) => entry.clerk_user_id === user.id)
+      .map((entry) => {
+        const matchingProblem = problems.find((problem) => problem.id === entry.contest_problem_id);
+        return {
+          ...entry,
+          title: entry.contest_problem?.title || matchingProblem?.title || "Untitled problem",
+        };
+      });
+  }, [problems, submissions, user?.id]);
+
+  const standings = useMemo(() => {
+    if (!contest?.start_time || problems.length === 0) {
+      return [];
+    }
+
+    const startTime = new Date(contest.start_time).getTime();
+    if (Number.isNaN(startTime)) {
+      return [];
+    }
+
+    const users = new Set();
+    registrants.forEach((item) => users.add(item.clerk_user_id));
+    submissions.forEach((item) => users.add(item.clerk_user_id));
+
+    const submissionsAsc = [...submissions].sort(
+      (a, b) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime()
+    );
+
+    const rows = Array.from(users).map((userId) => {
+      const profileEntry = registrants.find((item) => item.clerk_user_id === userId);
+      const handle =
+        profileEntry?.username ||
+        profileEntry?.display_name ||
+        `${userId?.slice(0, 8) || "user"}...`;
+
+      const perProblem = {};
+      problems.forEach((problem) => {
+        perProblem[problem.id] = {
+          acceptedAt: null,
+          wrongAttemptsBeforeAccepted: 0,
+        };
+      });
+
+      submissionsAsc.forEach((entry) => {
+        if (entry.clerk_user_id !== userId) return;
+
+        const problemState = perProblem[entry.contest_problem_id];
+        if (!problemState) return;
+
+        const verdict = entry.verdict;
+        if (!problemState.acceptedAt && verdict === "accepted") {
+          problemState.acceptedAt = new Date(entry.submitted_at);
+          return;
+        }
+
+        if (!problemState.acceptedAt && verdict && verdict !== "pending") {
+          problemState.wrongAttemptsBeforeAccepted += 1;
+        }
+      });
+
+      let solved = 0;
+      let penalty = 0;
+      const problemResults = {};
+
+      problems.forEach((problem) => {
+        const problemState = perProblem[problem.id];
+        if (!problemState) return;
+
+        if (problemState.acceptedAt) {
+          const diffMinutes = Math.max(
+            0,
+            Math.floor((problemState.acceptedAt.getTime() - startTime) / (1000 * 60))
+          );
+          const problemPenalty = diffMinutes + problemState.wrongAttemptsBeforeAccepted * 20;
+
+          solved += 1;
+          penalty += problemPenalty;
+          problemResults[problem.id] = {
+            solved: true,
+            penalty: problemPenalty,
+            wrongAttempts: problemState.wrongAttemptsBeforeAccepted,
+          };
+          return;
+        }
+
+        if (problemState.wrongAttemptsBeforeAccepted > 0) {
+          problemResults[problem.id] = {
+            solved: false,
+            penalty: problemState.wrongAttemptsBeforeAccepted * 20,
+            wrongAttempts: problemState.wrongAttemptsBeforeAccepted,
+          };
+        }
+      });
+
+      return {
+        handle,
+        solved,
+        penalty,
+        problemResults,
+      };
+    });
+
+    return rows
+      .filter((row) => row.solved > 0 || Object.keys(row.problemResults).length > 0)
+      .sort((a, b) => b.solved - a.solved || a.penalty - b.penalty || a.handle.localeCompare(b.handle))
+      .map((row, index) => ({
+        ...row,
+        rank: index + 1,
+      }));
+  }, [contest?.start_time, problems, registrants, submissions]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col">
+        <Header />
+        <main className="relative z-10 mx-auto flex w-full max-w-6xl flex-1 items-center justify-center px-4 py-10 sm:px-6 sm:py-12">
+          <p className="text-slate-400">Loading contest...</p>
+        </main>
+        <Footer />
+      </div>
+    );
   }
 
-  const [selectedProblem, setSelectedProblem] = useState("A");
-  const [language, setLanguage] = useState("C++17");
-  const [source, setSource] = useState("");
-  const [fileName, setFileName] = useState("");
-  const [activeTab, setActiveTab] = useState("problems");
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-  };
+  if (error || !contest) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col">
+        <Header />
+        <main className="relative z-10 mx-auto flex w-full max-w-6xl flex-1 items-center justify-center px-4 py-10 sm:px-6 sm:py-12">
+          <div className="rounded-2xl border border-white/10 bg-slate-900/80 p-8 text-center">
+            <p className="text-red-300">{error || "Contest not found"}</p>
+            <button
+              onClick={() => navigate("/contests")}
+              className="mt-4 inline-flex items-center justify-center rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-500"
+            >
+              Back to contests
+            </button>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col">
@@ -61,14 +333,19 @@ const OngoingContest = () => {
             </button>
           </div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">Ongoing Contest</p>
-          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Codezen Round</h1>
+          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{contest.title}</h1>
           <p className="text-sm text-slate-300 sm:text-base">Track problems, submit solutions, and watch the standings live.</p>
+          <div className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white">
+            <span className="text-slate-200">{countdownLabel}</span>
+            <span className="rounded-full border border-cyan-600/80 px-2 py-0.5 text-[11px] tracking-wide">
+              {countdown}
+            </span>
+          </div>
         </header>
 
         <div className="flex flex-wrap gap-2 rounded-xl border border-white/10 bg-slate-900/70 p-2">
           {[
             { key: "problems", label: "Problems" },
-            { key: "submit", label: "Submit Code" },
             { key: "submissions", label: "My Submissions" },
             { key: "standings", label: "Standings" },
           ].map((tab) => (
@@ -90,7 +367,7 @@ const OngoingContest = () => {
           <section className="rounded-2xl border border-white/10 bg-slate-900/80 p-6 shadow-xl shadow-slate-900/30">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-semibold">Problems</h2>
-              <span className="text-xs text-slate-400">A - F</span>
+              <span className="text-xs text-slate-400">{problems.length} listed</span>
             </div>
             <div className="overflow-hidden rounded-xl border border-white/5">
               <table className="w-full text-sm">
@@ -99,79 +376,35 @@ const OngoingContest = () => {
                     <th className="px-4 py-3 text-left font-semibold">Code</th>
                     <th className="px-4 py-3 text-left font-semibold">Title</th>
                     <th className="px-4 py-3 text-right font-semibold">Submissions</th>
+                    <th className="px-4 py-3 text-right font-semibold">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {sampleProblems.map((p) => (
-                    <tr
-                      key={p.code}
-                      className="hover:bg-white/5 cursor-pointer"
-                      onClick={() => setSelectedProblem(p.code)}
-                    >
+                  {problems.length === 0 && (
+                    <tr>
+                      <td className="px-4 py-6 text-center text-slate-400" colSpan={4}>
+                        No problems found for this contest.
+                      </td>
+                    </tr>
+                  )}
+                  {problems.map((p) => (
+                    <tr key={p.id} className="hover:bg-white/5">
                       <td className="px-4 py-3 font-semibold text-cyan-200">{p.code}</td>
                       <td className="px-4 py-3">{p.title}</td>
-                      <td className="px-4 py-3 text-right text-slate-300">{p.submissions}</td>
+                      <td className="px-4 py-3 text-right text-slate-300">{submissionsByProblem.get(p.id) || 0}</td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={() => navigate(`/contest/${id}/problem/${p.id}`)}
+                          className="rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/20"
+                        >
+                          Solve
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </section>
-        )}
-
-        {activeTab === "submit" && (
-          <section className="rounded-2xl border border-white/10 bg-slate-900/80 p-6 shadow-xl shadow-slate-900/30">
-            <div className="mb-2 flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold">Submit Code</h2>
-                <p className="text-xs text-slate-400">Problem {selectedProblem}</p>
-              </div>
-              <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-200">Live</span>
-            </div>
-            <form className="mt-4 flex flex-col gap-4" onSubmit={handleSubmit}>
-              <label className="text-sm font-medium text-slate-200">
-                Language
-                <select
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
-                  value={language}
-                  onChange={(e) => setLanguage(e.target.value)}
-                >
-                  <option>C++17</option>
-                  <option>Javascript</option>
-                  <option>Python3</option>
-                  <option>Java 17</option>
-                </select>
-              </label>
-
-              <label className="text-sm font-medium text-slate-200">
-                Upload file
-                <div className="mt-1 flex items-center gap-3 rounded-lg border border-dashed border-white/15 bg-slate-950 px-3 py-3 text-sm">
-                  <input
-                    type="file"
-                    className="text-xs text-slate-300"
-                    onChange={(e) => setFileName(e.target.files?.[0]?.name || "")}
-                  />
-                  {fileName && <span className="text-xs text-cyan-200">{fileName}</span>}
-                </div>
-              </label>
-
-              <label className="text-sm font-medium text-slate-200">
-                Or type code
-                <textarea
-                  className="mt-1 h-32 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
-                  placeholder="// Paste your solution here"
-                  value={source}
-                  onChange={(e) => setSource(e.target.value)}
-                />
-              </label>
-
-              <button
-                type="submit"
-                className="inline-flex items-center justify-center rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-500"
-              >
-                Submit
-              </button>
-            </form>
           </section>
         )}
 
@@ -192,14 +425,21 @@ const OngoingContest = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {sampleSubmissions.map((s, idx) => (
-                    <tr key={`${s.title}-${idx}`} className="hover:bg-white/5">
-                      <td className="px-4 py-3 font-medium text-slate-100">{s.title}</td>
-                      <td className="px-4 py-3 text-slate-300">{s.time}</td>
-                      <td className={`px-4 py-3 font-semibold ${s.verdict === "Accepted" ? "text-emerald-400" : "text-amber-300"}`}>
-                        {s.verdict}
+                  {mySubmissions.length === 0 && (
+                    <tr>
+                      <td className="px-4 py-6 text-center text-slate-400" colSpan={4}>
+                        You have not submitted any solution in this contest yet.
                       </td>
-                      <td className="px-4 py-3 text-slate-300">{s.language}</td>
+                    </tr>
+                  )}
+                  {mySubmissions.map((s) => (
+                    <tr key={s.id} className="hover:bg-white/5">
+                      <td className="px-4 py-3 font-medium text-slate-100">{s.title}</td>
+                      <td className="px-4 py-3 text-slate-300">{formatSubmissionTime(s.submitted_at)}</td>
+                      <td className={`px-4 py-3 font-semibold ${verdictTone(s.verdict)}`}>
+                        {formatVerdictLabel(s.verdict)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-300">{s.language || "-"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -212,25 +452,52 @@ const OngoingContest = () => {
           <section className="rounded-2xl border border-white/10 bg-slate-900/80 p-6 shadow-xl shadow-slate-900/30">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-semibold">Standings</h2>
-              <span className="text-xs text-slate-400">Top 4</span>
+              <span className="text-xs text-slate-400">{standings.length} Participants</span>
             </div>
             <div className="overflow-hidden rounded-xl border border-white/5">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-225">
                 <thead className="bg-white/5 text-slate-300">
                   <tr>
                     <th className="px-4 py-3 text-left font-semibold">Rank</th>
                     <th className="px-4 py-3 text-left font-semibold">Handle</th>
-                    <th className="px-4 py-3 text-left font-semibold">Score</th>
+                    {problems.map((problem) => (
+                      <th key={problem.id} className="px-4 py-3 text-center font-semibold">
+                        {problem.code}
+                      </th>
+                    ))}
                     <th className="px-4 py-3 text-left font-semibold">Solved</th>
                     <th className="px-4 py-3 text-left font-semibold">Penalty</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {sampleStandings.map((row) => (
+                  {standings.length === 0 && (
+                    <tr>
+                      <td className="px-4 py-6 text-center text-slate-400" colSpan={problems.length + 4}>
+                        No standings data available yet.
+                      </td>
+                    </tr>
+                  )}
+                  {standings.map((row) => (
                     <tr key={row.rank} className="hover:bg-white/5">
                       <td className="px-4 py-3 font-semibold text-cyan-200">{row.rank}</td>
                       <td className="px-4 py-3 font-medium text-slate-100">{row.handle}</td>
-                      <td className="px-4 py-3 text-slate-300">{row.score}</td>
+                      {problems.map((problem) => {
+                        const result = row.problemResults[problem.id];
+
+                        if (!result) {
+                          return <td key={`${row.rank}-${problem.id}`} className="px-4 py-3 text-center text-slate-500" />;
+                        }
+
+                        return (
+                          <td key={`${row.rank}-${problem.id}`} className="px-4 py-3 text-center">
+                            {result.solved ? (
+                              <span className="font-semibold text-emerald-400">+{result.penalty}</span>
+                            ) : (
+                              <span className="font-semibold text-rose-300">-{result.penalty}</span>
+                            )}
+                          </td>
+                        );
+                      })}
                       <td className="px-4 py-3 text-slate-300">{row.solved}</td>
                       <td className="px-4 py-3 text-slate-300">{row.penalty}</td>
                     </tr>
