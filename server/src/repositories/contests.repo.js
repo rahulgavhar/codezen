@@ -156,6 +156,26 @@ export async function fetchContestProblems(contestId) {
 	}));
 }
 
+export async function fetchContestProblemById(contestId, contestProblemId) {
+	ensureSupabaseConfigured();
+
+	const { data, error } = await supabase
+		.from('contest_problems')
+		.select('id, contest_id, problem_id, title')
+		.eq('contest_id', contestId)
+		.eq('id', contestProblemId)
+		.single();
+
+	if (error) {
+		if (error.code === 'PGRST116') {
+			return null;
+		}
+		throw error;
+	}
+
+	return data;
+}
+
 export async function fetchContestSubmissions(contestId) {
 	ensureSupabaseConfigured();
 
@@ -173,6 +193,7 @@ export async function fetchContestSubmissions(contestId) {
 			memory_kb,
 			test_cases_passed,
 			test_cases_total,
+			source_code,
 			contest_problems (
 				id,
 				title,
@@ -192,6 +213,64 @@ export async function fetchContestSubmissions(contestId) {
 		...row,
 		contest_problem: row.contest_problems || null,
 	}));
+}
+
+export async function fetchContestSubmissionByFingerprint({ contestId, contestProblemId, clerkUserId, submittedAt }) {
+	ensureSupabaseConfigured();
+
+	const { data, error } = await supabase
+		.from('contest_submissions')
+		.select('id, contest_id, contest_problem_id, clerk_user_id, submitted_at, verdict, language, runtime_ms, memory_kb, test_cases_passed, test_cases_total, source_code, error_message')
+		.eq('contest_id', contestId)
+		.eq('contest_problem_id', contestProblemId)
+		.eq('clerk_user_id', clerkUserId)
+		.eq('submitted_at', submittedAt)
+		.maybeSingle();
+
+	if (error) {
+		throw error;
+	}
+
+	return data || null;
+}
+
+export async function insertContestSubmission(payload) {
+	ensureSupabaseConfigured();
+
+	const { data, error } = await supabase
+		.from('contest_submissions')
+		.insert(payload)
+		.select('id, contest_id, contest_problem_id, clerk_user_id, submitted_at, verdict, language, runtime_ms, memory_kb, test_cases_passed, test_cases_total, source_code, error_message')
+		.single();
+
+	if (error) {
+		throw error;
+	}
+
+	return data;
+}
+
+export async function fetchBaseSubmissionsForContestWindow(problemIds, startTime, endTime) {
+	ensureSupabaseConfigured();
+
+	if (!Array.isArray(problemIds) || problemIds.length === 0) {
+		return [];
+	}
+
+	const { data, error } = await supabase
+		.from('submissions')
+		.select('id, clerk_user_id, problem_id, submitted_at, language, verdict, runtime_ms, memory_kb, test_cases_passed, test_cases_total, source_code, error_message')
+		.in('problem_id', problemIds)
+		.gte('submitted_at', startTime)
+		.lte('submitted_at', endTime)
+		.order('submitted_at', { ascending: false })
+		.limit(2000);
+
+	if (error) {
+		throw error;
+	}
+
+	return data || [];
 }
 
 export async function fetchContestRegistrants(contestId, options = {}) {

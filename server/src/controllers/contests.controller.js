@@ -95,6 +95,30 @@ export async function getContestSubmissions(req, res, next) {
 	}
 }
 
+export async function createContestSubmission(req, res, next) {
+	try {
+		const clerkUserId = getAuthUserId(req);
+		if (!clerkUserId) {
+			return res.status(401).json({
+				success: false,
+				message: 'Unauthorized',
+			});
+		}
+
+		const { contestId } = req.params;
+		const created = await contestService.createContestSubmission(
+			contestId,
+			clerkUserId,
+			req.body || {}
+		);
+
+		return res.status(201).json(created);
+	} catch (error) {
+		console.error('Error in createContestSubmission:', error);
+		next(error);
+	}
+}
+
 export async function getContestRegistrants(req, res, next) {
 	try {
 		const { contestId } = req.params;

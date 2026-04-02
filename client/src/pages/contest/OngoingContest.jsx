@@ -4,6 +4,7 @@ import { useUser } from "@clerk/clerk-react";
 import { useSelector } from "react-redux";
 import Header from "../../components/Header";
 import Footer from "../../components/Footer";
+import CodeReplay from "./CodeReplay";
 import axiosInstance from "../../lib/axios";
 
 const toProblemCode = (index) => {
@@ -75,6 +76,7 @@ const OngoingContest = () => {
   const [problems, setProblems] = useState([]);
   const [submissions, setSubmissions] = useState([]);
   const [registrants, setRegistrants] = useState([]);
+  const [activeReplay, setActiveReplay] = useState(null);
 
   useEffect(() => {
     hasEndPopupShownRef.current = false;
@@ -269,6 +271,7 @@ const OngoingContest = () => {
       });
 
       return {
+        userId,
         handle,
         solved,
         penalty,
@@ -284,6 +287,29 @@ const OngoingContest = () => {
         rank: index + 1,
       }));
   }, [contest?.start_time, problems, registrants, submissions]);
+
+  const contestStatus = useMemo(() => getContestStatus(contest), [contest, countdown]);
+
+  const openReplay = (row, problem, result) => {
+    const acceptedSubmission = submissions
+      .filter(
+        (entry) =>
+          entry.clerk_user_id === row.userId &&
+          entry.contest_problem_id === problem.id &&
+          entry.verdict === "accepted"
+      )
+      .sort((a, b) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime())[0];
+
+    setActiveReplay({
+      rank: row.rank,
+      handle: row.handle,
+      problemCode: problem.code,
+      problemTitle: problem.title,
+      penalty: result.penalty,
+      sourceCode: acceptedSubmission?.source_code || "",
+      submittedAt: acceptedSubmission?.submitted_at || null,
+    });
+  };
 
   if (loading) {
     return (
@@ -451,7 +477,15 @@ const OngoingContest = () => {
         {activeTab === "standings" && (
           <section className="rounded-2xl border border-white/10 bg-slate-900/80 p-6 shadow-xl shadow-slate-900/30">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Standings</h2>
+              <h2 className="flex items-center gap-2 text-lg font-semibold">
+                <span>Standings</span>
+                {contestStatus === "Live" && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+                    Live
+                  </span>
+                )}
+              </h2>
               <span className="text-xs text-slate-400">{standings.length} Participants</span>
             </div>
             <div className="overflow-hidden rounded-xl border border-white/5">
@@ -489,9 +523,25 @@ const OngoingContest = () => {
                         }
 
                         return (
-                          <td key={`${row.rank}-${problem.id}`} className="px-4 py-3 text-center">
+                          <td
+                            key={`${row.rank}-${problem.id}`}
+                            className={`px-4 py-3 text-center ${
+                              result.solved && contestStatus === "Ended" ? "group relative" : ""
+                            }`}
+                          >
                             {result.solved ? (
-                              <span className="font-semibold text-emerald-400">+{result.penalty}</span>
+                              <>
+                                <span className="font-semibold text-emerald-400">+{result.penalty}</span>
+                                {contestStatus === "Ended" && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openReplay(row, problem, result)}
+                                    className="pointer-events-none absolute top-full left-1/2 z-10 mt-1 -translate-x-1/2 rounded-md border border-cyan-400/50 bg-cyan-500/15 px-2 py-1 text-[11px] font-semibold text-cyan-200 opacity-0 shadow-lg shadow-cyan-900/30 transition duration-150 group-hover:pointer-events-auto group-hover:opacity-100 hover:bg-cyan-500/25"
+                                  >
+                                    Play
+                                  </button>
+                                )}
+                              </>
                             ) : (
                               <span className="font-semibold text-rose-300">-{result.penalty}</span>
                             )}
@@ -509,6 +559,23 @@ const OngoingContest = () => {
         )}
 
       </main>
+
+      {activeReplay && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/80 px-2 py-4 backdrop-blur-sm sm:px-4">
+          <div className="relative h-full w-[98vw] max-h-[96vh] overflow-hidden rounded-2xl border border-cyan-400/40 bg-slate-950 shadow-2xl shadow-cyan-900/40">
+            <button
+              type="button"
+              onClick={() => setActiveReplay(null)}
+              className="absolute top-3 right-3 z-20 rounded-full border border-white/20 bg-black/40 px-3 py-1 text-xs font-semibold text-slate-100 transition hover:border-cyan-400/60"
+            >
+              Close
+            </button>
+            <div className="h-full overflow-hidden p-2 sm:p-3">
+              <CodeReplay replay={activeReplay} />
+            </div>
+          </div>
+        </div>
+      )}
 
       <Footer />
     </div>

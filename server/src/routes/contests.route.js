@@ -13,6 +13,7 @@ router.post('/problems/:problemId/transform-description', contestsController.tra
 router.get('/:contestId', contestsController.getContestById);
 router.get('/:contestId/problems', contestsController.getContestProblems);
 router.get('/:contestId/submissions', contestsController.getContestSubmissions);
+router.post('/:contestId/submissions', contestsController.createContestSubmission);
 router.get('/:contestId/registrants', contestsController.getContestRegistrants);
 
 export default router;

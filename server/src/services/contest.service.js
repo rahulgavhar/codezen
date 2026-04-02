@@ -1,4 +1,5 @@
 import * as contestsRepo from '../repositories/contests.repo.js';
+import * as submissionsRepo from '../repositories/submissions.repo.js';
 
 function buildHttpError(message, statusCode) {
 	const error = new Error(message);
@@ -59,6 +60,111 @@ function normalizeProblems(problems) {
 			points,
 		};
 	});
+}
+
+const terminalVerdicts = new Set([
+	'accepted',
+	'wrong_answer',
+	'compilation_error',
+	'runtime_error',
+	'time_limit',
+	'internal_error',
+	'exec_format_error',
+	'error',
+]);
+
+function buildContestSubmissionPayload(contestId, contestProblemId, clerkUserId, submission) {
+	const normalizedVerdict = submission.verdict === 'error' ? 'internal_error' : submission.verdict;
+	const requiresMetrics = !['pending', 'compilation_error'].includes(normalizedVerdict);
+
+	return {
+		contest_id: contestId,
+		contest_problem_id: contestProblemId,
+		clerk_user_id: clerkUserId,
+		submitted_at: submission.submitted_at,
+		language: submission.language,
+		verdict: normalizedVerdict,
+		runtime_ms: requiresMetrics ? (submission.runtime_ms ?? 0) : submission.runtime_ms,
+		memory_kb: requiresMetrics ? (submission.memory_kb ?? 0) : submission.memory_kb,
+		test_cases_passed: submission.test_cases_passed || 0,
+		test_cases_total: submission.test_cases_total || 0,
+		source_code: submission.source_code,
+		error_message: submission.error_message || null,
+	};
+}
+
+async function upsertContestSubmissionFromBase(contestId, contestProblemId, clerkUserId, submission) {
+	const existing = await contestsRepo.fetchContestSubmissionByFingerprint({
+		contestId,
+		contestProblemId,
+		clerkUserId,
+		submittedAt: submission.submitted_at,
+	});
+
+	if (existing) {
+		return existing;
+	}
+
+	const insertPayload = buildContestSubmissionPayload(contestId, contestProblemId, clerkUserId, submission);
+	return contestsRepo.insertContestSubmission(insertPayload);
+}
+
+async function syncContestSubmissionsFromBase(contestId) {
+	const contest = await contestsRepo.fetchContestById(contestId);
+	if (!contest?.start_time || !contest?.end_time) {
+		return;
+	}
+
+	const contestProblems = await contestsRepo.fetchContestProblems(contestId);
+	if (!Array.isArray(contestProblems) || contestProblems.length === 0) {
+		return;
+	}
+
+	const problemIdToContestProblemId = new Map();
+	for (const contestProblem of contestProblems) {
+		if (!contestProblem?.problem_id || !contestProblem?.id) {
+			continue;
+		}
+		if (!problemIdToContestProblemId.has(contestProblem.problem_id)) {
+			problemIdToContestProblemId.set(contestProblem.problem_id, contestProblem.id);
+		}
+	}
+
+	const problemIds = Array.from(problemIdToContestProblemId.keys());
+	if (problemIds.length === 0) {
+		return;
+	}
+
+	const baseSubmissions = await contestsRepo.fetchBaseSubmissionsForContestWindow(
+		problemIds,
+		contest.start_time,
+		contest.end_time
+	);
+
+	for (const submission of baseSubmissions) {
+		if (!terminalVerdicts.has(submission.verdict)) {
+			continue;
+		}
+
+		const contestProblemId = problemIdToContestProblemId.get(submission.problem_id);
+		if (!contestProblemId) {
+			continue;
+		}
+
+		try {
+			await upsertContestSubmissionFromBase(
+				contestId,
+				contestProblemId,
+				submission.clerk_user_id,
+				submission
+			);
+		} catch (error) {
+			console.warn(
+				`Skipping contest submission sync for submission ${submission.id}:`,
+				error.message
+			);
+		}
+	}
 }
 
 export async function createContest(clerkUserId, payload = {}) {
@@ -138,7 +244,45 @@ export async function getContestProblems(contestId) {
 }
 
 export async function getContestSubmissions(contestId) {
+	await syncContestSubmissionsFromBase(contestId);
 	return contestsRepo.fetchContestSubmissions(contestId);
+}
+
+export async function createContestSubmission(contestId, clerkUserId, payload = {}) {
+	if (!contestId) {
+		throw buildHttpError('contestId is required', 400);
+	}
+
+	const { submission_id: submissionId, contest_problem_id: contestProblemId } = payload;
+
+	if (!submissionId || !contestProblemId) {
+		throw buildHttpError('submission_id and contest_problem_id are required', 400);
+	}
+
+	const contest = await contestsRepo.fetchContestById(contestId);
+	if (!contest) {
+		throw buildHttpError('Contest not found', 404);
+	}
+
+	const contestProblem = await contestsRepo.fetchContestProblemById(contestId, contestProblemId);
+	if (!contestProblem) {
+		throw buildHttpError('Contest problem not found', 404);
+	}
+
+	const submission = await submissionsRepo.getSubmissionById(submissionId, clerkUserId);
+	if (!submission) {
+		throw buildHttpError('Submission not found', 404);
+	}
+
+	if (submission.problem_id !== contestProblem.problem_id) {
+		throw buildHttpError('Submission problem does not match contest problem', 400);
+	}
+
+	if (!terminalVerdicts.has(submission.verdict)) {
+		throw buildHttpError('Submission is not finalized yet', 409);
+	}
+
+	return upsertContestSubmissionFromBase(contestId, contestProblemId, clerkUserId, submission);
 }
 
 export async function getContestRegistrants(contestId, queryParams = {}) {

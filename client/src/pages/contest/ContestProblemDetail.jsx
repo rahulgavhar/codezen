@@ -593,6 +593,15 @@ class Main {
         isFullSubmit: true,
         error_message: submissionData.error_message || null,
       });
+
+      try {
+        await axiosInstance.post(`/api/contests/${id}/submissions`, {
+          submission_id: submissionId,
+          contest_problem_id: contestProblemId,
+        });
+      } catch (persistErr) {
+        console.warn("Failed to persist contest submission:", persistErr.response?.data || persistErr.message);
+      }
     } catch (error) {
       console.error("Error submitting:", error);
       const errorMessage = error.response?.data?.message || error.message || "Unknown error";
