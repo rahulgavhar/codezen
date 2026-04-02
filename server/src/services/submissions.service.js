@@ -2,6 +2,7 @@ import * as submissionsRepo from '../repositories/submissions.repo.js';
 import * as judge0Service from './judge0.service.js';
 import { ENV } from '../config/env.config.js';
 import { supabase } from '../config/supabase.client.js';
+import { ensureVMReadyForExecution } from './vm.service.js';
 
 /**
  * Get all submissions for the current user with formatted data
@@ -237,6 +238,9 @@ export async function submitTestCasesToJudge0(language, code, testCaseSets, call
 export async function createSubmission(clerkUserId, submissionData) {
   const baseUrl = ENV.JUDGE_CALLBACK_URL || `${ENV.PUBLIC_BACKEND_URL}/api/webhooks/judge0`;
 
+  // Execution must start only after VM is confirmed running.
+  await ensureVMReadyForExecution();
+
   // Create initial submission record with "pending" verdict
   const payload = {
     clerk_user_id: clerkUserId,
@@ -338,6 +342,9 @@ export async function createSubmission(clerkUserId, submissionData) {
 export async function runSampleTest(clerkUserId, problemId, language, code, sampleInput) {
   try {
     console.log(`Running sample test for problem ${problemId} with language ${language}`);
+
+    // Execution must start only after VM is confirmed running.
+    await ensureVMReadyForExecution();
     
     // Run single sample test without storing in DB
     // Note: NOT setting callback_url since we poll synchronously
@@ -612,13 +619,46 @@ export async function updateTestCaseResultFromJudge0(judge0Token, judge0Data) {
         intermediateVerdict = 'wrong_answer';
       }
 
-      console.log(`  → Intermediate verdict: ${intermediateVerdict}, ${intermediatePassedCount}/${nonPendingTests} passed so far`);
+      // For some verdicts, DB trigger requires runtime_ms and memory_kb.
+      // Aggregate partial metrics from whatever test results are already judged.
+      let intermediateMaxRuntime = null;
+      let intermediateMaxMemory = null;
+      for (const result of Object.values(testResults)) {
+        if (result.runtime_ms !== null && result.runtime_ms !== undefined) {
+          intermediateMaxRuntime = Math.max(intermediateMaxRuntime || 0, result.runtime_ms);
+        }
+        if (result.memory_kb !== null && result.memory_kb !== undefined) {
+          intermediateMaxMemory = Math.max(intermediateMaxMemory || 0, result.memory_kb);
+        }
+      }
 
-      const intermediateUpdate = await submissionsRepo.updateSubmissionVerdict(submission.id, {
+      const metricsRequiredVerdicts = new Set(['accepted', 'wrong_answer', 'time_limit', 'runtime_error']);
+      let safeIntermediateVerdict = intermediateVerdict;
+
+      if (
+        metricsRequiredVerdicts.has(intermediateVerdict)
+        && (intermediateMaxRuntime === null || intermediateMaxMemory === null)
+      ) {
+        // Keep polling with pending until we have enough metrics to satisfy DB checks.
+        safeIntermediateVerdict = 'pending';
+      }
+
+      console.log(
+        `  → Intermediate verdict: ${safeIntermediateVerdict}, ${intermediatePassedCount}/${nonPendingTests} passed so far`
+      );
+
+      const intermediatePayload = {
         test_results: testResults,
         test_cases_passed: intermediatePassedCount,
-        verdict: intermediateVerdict, // Update verdict so UI can see progress
-      });
+        verdict: safeIntermediateVerdict,
+      };
+
+      if (metricsRequiredVerdicts.has(safeIntermediateVerdict)) {
+        intermediatePayload.runtime_ms = intermediateMaxRuntime;
+        intermediatePayload.memory_kb = intermediateMaxMemory;
+      }
+
+      const intermediateUpdate = await submissionsRepo.updateSubmissionVerdict(submission.id, intermediatePayload);
 
       console.log(`  → Submission updated: verdict=${intermediateUpdate.verdict}, passed=${intermediateUpdate.test_cases_passed}/${totalTests}`);
       return intermediateUpdate;

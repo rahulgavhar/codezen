@@ -113,9 +113,15 @@ export async function createSubmission(req, res) {
     res.status(201).json(submission);
   } catch (error) {
     console.error('Error in createSubmission controller:', error);
-    
+    const message = error.message || '';
+
     // Return appropriate HTTP status code
-    const statusCode = error.message?.includes('timeout') ? 504 : 500;
+    let statusCode = 500;
+    if (message.includes('timeout')) {
+      statusCode = 504;
+    } else if (message.includes('Execution VM is not ready')) {
+      statusCode = 503;
+    }
     
     res.status(statusCode).json({ 
       error: 'Failed to create submission',
@@ -168,7 +174,10 @@ export async function runSampleTest(req, res) {
     res.status(200).json(result);
   } catch (error) {
     console.error('Error in runSampleTest controller:', error);
-    res.status(500).json({ 
+    const message = error.message || '';
+    const statusCode = message.includes('Execution VM is not ready') ? 503 : 500;
+
+    res.status(statusCode).json({ 
       error: 'Failed to run sample test',
       message: error.message 
     });

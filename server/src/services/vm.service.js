@@ -1,5 +1,80 @@
 import { startVM, stopVM, getVMPowerState } from "../controllers/vms.controller.js";
 import * as vmsRepo from "../repositories/vms.repo.js";
+import { ENV } from "../config/env.config.js";
+
+let vmEnsureInFlight = null;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function markVMRunningInDb() {
+  try {
+    const vmState = await vmsRepo.getVMState();
+    if (vmState) {
+      await vmsRepo.updateVMState(vmState.id, "Running");
+    }
+  } catch (error) {
+    // Best effort only; do not block execution flow on telemetry state sync.
+    console.warn("[VM Service] Failed to sync VM DB state:", error.message);
+  }
+}
+
+/**
+ * Ensure execution VM is running before code execution begins.
+ * Blocks caller until VM is ready (or timeout).
+ */
+export async function ensureVMReadyForExecution(options = {}) {
+  const {
+    timeoutMs = 180000,
+    pollIntervalMs = 5000,
+  } = options;
+
+  // Local/dev environments typically do not require Azure VM orchestration.
+  if (ENV.NODE_ENV !== "production") {
+    return true;
+  }
+
+  if (vmEnsureInFlight) {
+    return vmEnsureInFlight;
+  }
+
+  const inFlight = (async () => {
+    const deadline = Date.now() + timeoutMs;
+    let startAttempted = false;
+
+    while (Date.now() < deadline) {
+      const state = await getVMPowerState();
+      console.log(`[VM Service] ensureVMReadyForExecution: current state=${state}`);
+
+      if (state === "running") {
+        await markVMRunningInDb();
+        return true;
+      }
+
+      if ((state === "deallocated" || state === "stopped") && !startAttempted) {
+        console.log("[VM Service] VM is stopped/deallocated. Starting VM before execution...");
+        await startVM();
+        startAttempted = true;
+        continue;
+      }
+
+      await sleep(pollIntervalMs);
+    }
+
+    throw new Error("Execution VM is not ready yet. Please retry in a moment.");
+  })();
+
+  vmEnsureInFlight = inFlight;
+
+  try {
+    return await inFlight;
+  } finally {
+    if (vmEnsureInFlight === inFlight) {
+      vmEnsureInFlight = null;
+    }
+  }
+}
 
 /**
  * Check if VM should be shut down based on user inactivity
