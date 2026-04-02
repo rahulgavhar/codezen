@@ -86,13 +86,10 @@ ALTER TABLE public.submissions
 ADD CONSTRAINT chk_testcase_counts
 CHECK (test_cases_passed <= test_cases_total);
 
--- Either problem_id or interview_id (mutually exclusive)
+-- Problem XOR Interview (mutually exclusive, but both can be null for IDE mode)
 ALTER TABLE public.submissions
 ADD CONSTRAINT chk_problem_or_interview
-CHECK (
-  (problem_id IS NOT NULL AND interview_id IS NULL)
-  OR (problem_id IS NULL AND interview_id IS NOT NULL)
-);
+CHECK (NOT (problem_id IS NOT NULL AND interview_id IS NOT NULL));
 
 --------------------------------------------------------------------------------
 -- Indexes (HIGHLY IMPORTANT FOR SCALE)

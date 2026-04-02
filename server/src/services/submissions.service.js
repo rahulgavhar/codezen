@@ -151,6 +151,7 @@ export async function submitTestCasesToJudge0(language, code, testCaseSets, call
           language,
           source_code: code,
           stdin: input,
+          expected_output: expectedOutput ?? '',
           callback_url: callbackUrl,
         });
       } catch (judge0Error) {
@@ -455,27 +456,29 @@ export async function getUserSubmissionStats(clerkUserId) {
 function decodeBase64IfNeeded(data) {
   if (!data) return data;
   if (typeof data !== 'string') return data;
-  
   const trimmed = data.trim();
   if (!trimmed) return data;
-  
-  // First check: does it look like base64?
-  // Base64 strings only contain A-Z, a-z, 0-9, +, /, and = for padding
+
+  // Normalize common variants for large payloads:
+  // - remove line wraps/whitespace
+  // - convert URL-safe base64 to standard
+  let normalized = trimmed.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+
   const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
-  if (!base64Regex.test(trimmed)) {
-    // Not base64, return as-is
+  if (!base64Regex.test(normalized)) {
     return data;
   }
-  
-  // Second check: base64 strings should have length divisible by 4 (or account for padding)
-  if (trimmed.length % 4 !== 0) {
-    // Invalid base64 length, return as-is
+
+  const remainder = normalized.length % 4;
+  if (remainder === 1) {
     return data;
+  }
+  if (remainder > 0) {
+    normalized += '='.repeat(4 - remainder);
   }
   
   try {
-    // Try to decode as base64
-    const decoded = Buffer.from(trimmed, 'base64').toString('utf-8');
+    const decoded = Buffer.from(normalized, 'base64').toString('utf-8');
     
     // Third check: verify the decoded output is valid text and looks reasonable
     // Check that decoded doesn't contain excessive control characters (except newlines/tabs/CR)
@@ -495,7 +498,7 @@ function decodeBase64IfNeeded(data) {
       }
     }
     
-    // If null byte found or more than 10% control characters, it's probably binary data
+    // If null byte found or too many control characters, it's likely binary/gibberish.
     if (nullByteFound || controlCharCount > decoded.length * 0.1) {
       return data;
     }

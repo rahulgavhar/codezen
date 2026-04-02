@@ -15,6 +15,7 @@ const LANGUAGE_ID_MAP = {
  * @param {string} params.language - Programming language (javascript, python, cpp, java)
  * @param {string} params.source_code - Source code to execute
  * @param {string} [params.stdin] - Standard input for the program
+ * @param {string} [params.expected_output] - Expected output for verdict evaluation
  * @param {number} [params.cpu_time_limit] - CPU time limit in seconds (default from Judge0)
  * @param {number} [params.memory_limit] - Memory limit in KB (default from Judge0)
  * @param {string} [params.callback_url] - Callback URL for Judge0 to POST results
@@ -24,6 +25,7 @@ export async function createSubmissionOnJudge0({
   language,
   source_code,
   stdin = null,
+  expected_output = null,
   cpu_time_limit = null,
   memory_limit = null,
   callback_url = null,
@@ -41,6 +43,9 @@ export async function createSubmissionOnJudge0({
 
   // Add optional fields if provided
   if (stdin) payload.stdin = stdin;
+  if (expected_output !== null && expected_output !== undefined) {
+    payload.expected_output = expected_output;
+  }
   if (cpu_time_limit) payload.cpu_time_limit = cpu_time_limit;
   if (memory_limit) payload.memory_limit = memory_limit;
   if (callback_url) payload.callback_url = callback_url;

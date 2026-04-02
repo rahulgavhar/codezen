@@ -8,24 +8,30 @@ import { FaPlay } from "react-icons/fa";
 function decodeBase64IfNeeded(data) {
   if (!data) return data;
   if (typeof data !== 'string') return data;
-  
   const trimmed = data.trim();
   if (!trimmed) return data;
-  
-  // First check: does it look like base64?
-  // Base64 strings only contain A-Z, a-z, 0-9, +, /, and = for padding
+
+  let normalized = trimmed.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
   const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
-  if (!base64Regex.test(trimmed)) {
+  if (!base64Regex.test(normalized)) {
     return data;
   }
-  
-  // Second check: base64 strings should have length divisible by 4
-  if (trimmed.length % 4 !== 0) {
+
+  const remainder = normalized.length % 4;
+  if (remainder === 1) {
     return data;
+  }
+  if (remainder > 0) {
+    normalized += "=".repeat(4 - remainder);
   }
   
   try {
-    const decoded = atob(trimmed);
+    const binary = atob(normalized);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    const decoded = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
     
     // Verify decoded output is valid text
     let controlCharCount = 0;
