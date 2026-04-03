@@ -498,7 +498,7 @@ export async function getContestLeaderboard(contestId, queryParams = {}) {
 				0,
 				Math.floor((problemState.acceptedAt.getTime() - startTime) / (1000 * 60))
 			);
-			const problemPenalty = diffMinutes + problemState.wrongAttemptsBeforeAccepted * 20;
+			const problemPenalty = diffMinutes + problemState.wrongAttemptsBeforeAccepted * 10;
 
 			solved += 1;
 			penalty += problemPenalty;

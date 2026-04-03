@@ -420,7 +420,9 @@ export async function runSampleTest(clerkUserId, problemId, language, code, samp
       }
       
       try {
-        const resultData = await judge0Service.getSubmissionFromJudge0(judge0Token);
+        const resultData = await judge0Service.getSubmissionFromJudge0(judge0Token, {
+          language,
+        });
         judge0Data = resultData;
         console.log(`Poll attempt ${attempts + 1}: status=${judge0Data.status?.id}`);
       } catch (err) {
@@ -891,7 +893,9 @@ export async function pollStuckTestCasesFromJudge0(submissionId, testResults, te
   
   for (const { tcId, token } of stuckTestCases) {
     try {
-      const judge0Data = await judge0Service.getSubmissionFromJudge0(token);
+      const judge0Data = await judge0Service.getSubmissionFromJudge0(token, {
+        language: submissionLanguage,
+      });
       
       // Check if this submission has completed
       if (!judge0Data.status || judge0Data.status.id < 3) {

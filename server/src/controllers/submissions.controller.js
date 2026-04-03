@@ -1,4 +1,15 @@
 import * as submissionsService from '../services/submissions.service.js';
+import { ENV } from '../config/env.config.js';
+
+const MAX_SOURCE_CODE_BYTES = Number(ENV.MAX_SOURCE_CODE_BYTES || 2097152);
+
+function getUtf8Bytes(value) {
+  return Buffer.byteLength(String(value ?? ''), 'utf8');
+}
+
+function getMaxSourceCodeMB() {
+  return (MAX_SOURCE_CODE_BYTES / (1024 * 1024)).toFixed(2);
+}
 
 /**
  * Get all submissions for the current user
@@ -76,10 +87,20 @@ export async function createSubmission(req, res) {
     const { problem_id, language, source_code, stdin } = req.body;
 
     // Validate required fields (problem_id is optional for IDE)
-    if (!language || !source_code) {
+    if (!language || typeof source_code !== 'string' || source_code.length === 0) {
       return res.status(400).json({ 
         error: 'Missing required fields',
         required: ['language', 'source_code']
+      });
+    }
+
+    const sourceBytes = getUtf8Bytes(source_code);
+    if (sourceBytes > MAX_SOURCE_CODE_BYTES) {
+      return res.status(413).json({
+        error: 'Payload Too Large',
+        message: `Source code exceeds maximum allowed size of ${getMaxSourceCodeMB()} MB.`,
+        maxBytes: MAX_SOURCE_CODE_BYTES,
+        receivedBytes: sourceBytes,
       });
     }
 
@@ -147,10 +168,20 @@ export async function runSampleTest(req, res) {
     const { problem_id, language, source_code, sample_input } = req.body;
 
     // Validate required fields
-    if (!problem_id || !language || !source_code) {
+    if (!problem_id || !language || typeof source_code !== 'string' || source_code.length === 0) {
       return res.status(400).json({ 
         error: 'Missing required fields',
         required: ['problem_id', 'language', 'source_code']
+      });
+    }
+
+    const sourceBytes = getUtf8Bytes(source_code);
+    if (sourceBytes > MAX_SOURCE_CODE_BYTES) {
+      return res.status(413).json({
+        error: 'Payload Too Large',
+        message: `Source code exceeds maximum allowed size of ${getMaxSourceCodeMB()} MB.`,
+        maxBytes: MAX_SOURCE_CODE_BYTES,
+        receivedBytes: sourceBytes,
       });
     }
 

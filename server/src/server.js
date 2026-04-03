@@ -50,8 +50,8 @@ app.use(cors({
 }));
 app.use(clerkMiddleware());
 app.use(cookieParser());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: ENV.MAX_REQUEST_BODY_LIMIT }));
+app.use(express.urlencoded({ extended: true, limit: ENV.MAX_REQUEST_BODY_LIMIT }));
 
 // Health Check Route
 app.use("/api/health", (req, res) => {
@@ -77,13 +77,21 @@ app.use("/api/interview-problems", trackActivityAndStartVM, interviewProblemsRou
 // Global error handler
 app.use((err, req, res, next) => {
   console.error('Global error handler:', err);
+
+  if (err?.type === 'entity.too.large' || err?.status === 413) {
+    return res.status(413).json({
+      error: 'Payload Too Large',
+      message: 'Request body exceeds allowed limit.',
+      limit: ENV.MAX_REQUEST_BODY_LIMIT,
+    });
+  }
   
   // Handle timeout errors
-  if (err.code === 'ETIMEDOUT' || err.message.includes('timeout')) {
+  if (err?.code === 'ETIMEDOUT' || String(err?.message || '').includes('timeout')) {
     return res.status(504).json({
       error: 'Gateway Timeout',
       message: 'The server took too long to process your request. Please try again.',
-      details: err.message,
+      details: err?.message,
     });
   }
   

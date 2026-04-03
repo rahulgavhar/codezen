@@ -9,6 +9,46 @@ const LANGUAGE_ID_MAP = {
   java: 62,        // Java
 };
 
+const CPP_LANGUAGE_ID = 54;
+
+function isCppLanguage({ language, languageId } = {}) {
+  if (typeof language === 'string' && language.toLowerCase() === 'cpp') {
+    return true;
+  }
+
+  const parsedLanguageId = Number(languageId);
+  return Number.isFinite(parsedLanguageId) && parsedLanguageId === CPP_LANGUAGE_ID;
+}
+
+function decodeBase64Field(value) {
+  if (value === null || value === undefined || typeof value !== 'string') {
+    return value;
+  }
+
+  if (!value.length) {
+    return value;
+  }
+
+  try {
+    return Buffer.from(value, 'base64').toString('utf-8');
+  } catch {
+    return value;
+  }
+}
+
+function decodeCppJudge0OutputsIfNeeded(payload, shouldDecodeCppOutputs) {
+  if (!payload || !shouldDecodeCppOutputs) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    stdout: decodeBase64Field(payload.stdout),
+    stderr: decodeBase64Field(payload.stderr),
+    compile_output: decodeBase64Field(payload.compile_output),
+  };
+}
+
 /**
  * Create a submission on Judge0
  * @param {Object} params - Submission parameters
@@ -73,15 +113,20 @@ export async function createSubmissionOnJudge0({
 /**
  * Get submission details from Judge0
  * @param {string} token - Judge0 submission token
+ * @param {Object} [options] - Optional language context
+ * @param {string} [options.language] - Internal language label (javascript/python/cpp/java)
+ * @param {number|string} [options.languageId] - Judge0 language_id (54 for C++)
  * @returns {Promise<Object>} Submission details from Judge0
  */
-export async function getSubmissionFromJudge0(token) {
+export async function getSubmissionFromJudge0(token, options = {}) {
+  const shouldUseBase64Encoding = isCppLanguage(options);
+
   try {
     const response = await axios.get(
       `${ENV.JUDGE_SERVER_URL}/submissions/${token}`,
       {
         params: {
-          base64_encoded: false,
+          base64_encoded: shouldUseBase64Encoding,
         },
         headers: {
           'X-Auth-Token': ENV.JUDGE_AUTH_TOKEN,
@@ -90,7 +135,7 @@ export async function getSubmissionFromJudge0(token) {
       }
     );
 
-    return response.data;
+    return decodeCppJudge0OutputsIfNeeded(response.data, shouldUseBase64Encoding);
   } catch (error) {
     console.error('Error fetching Judge0 submission:', error.message);
     throw new Error(`Failed to fetch from Judge0: ${error.message}`);

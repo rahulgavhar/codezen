@@ -249,7 +249,7 @@ const StaffContestDetail = () => {
             0,
             Math.floor((problemState.acceptedAt.getTime() - startTime) / (1000 * 60))
           );
-          const problemPenalty = diffMinutes + problemState.wrongAttemptsBeforeAccepted * 20;
+          const problemPenalty = diffMinutes + problemState.wrongAttemptsBeforeAccepted * 10;
 
           problemResults[problem.id] = {
             solved: true,
@@ -262,7 +262,7 @@ const StaffContestDetail = () => {
         if (problemState.wrongAttemptsBeforeAccepted > 0) {
           problemResults[problem.id] = {
             solved: false,
-            penalty: problemState.wrongAttemptsBeforeAccepted * 20,
+            penalty: problemState.wrongAttemptsBeforeAccepted * 10,
             wrongAttempts: problemState.wrongAttemptsBeforeAccepted,
           };
         }

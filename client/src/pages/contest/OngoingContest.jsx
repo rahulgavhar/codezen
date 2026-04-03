@@ -5,6 +5,13 @@ import { useSelector } from "react-redux";
 import Header from "../../components/Header";
 import Footer from "../../components/Footer";
 import axiosInstance from "../../lib/axios";
+import toast from "react-hot-toast";
+
+const contestLifecycleToastStyle = {
+  border: "1px solid rgba(250, 204, 21, 0.35)",
+  background: "rgba(15, 23, 42, 0.96)",
+  color: "#e2e8f0",
+};
 
 const toProblemCode = (displayOrder, fallbackIndex = 0) => {
   const normalizedOrder =
@@ -195,7 +202,12 @@ const OngoingContest = () => {
 
       if (!hasEndPopupShownRef.current) {
         hasEndPopupShownRef.current = true;
-        alert("Contest has ended.");
+        toast("Contest has ended. Redirecting to contest page.", {
+          id: "contest-ended-toast",
+          position: "top-center",
+          duration: 2800,
+          style: contestLifecycleToastStyle,
+        });
         navigate(`/contest/${id}/info`, { replace: true });
       }
     };
@@ -295,7 +307,7 @@ const OngoingContest = () => {
             0,
             Math.floor((problemState.acceptedAt.getTime() - startTime) / (1000 * 60))
           );
-          const problemPenalty = diffMinutes + problemState.wrongAttemptsBeforeAccepted * 20;
+          const problemPenalty = diffMinutes + problemState.wrongAttemptsBeforeAccepted * 10;
 
           solved += 1;
           penalty += problemPenalty;
@@ -310,7 +322,7 @@ const OngoingContest = () => {
         if (problemState.wrongAttemptsBeforeAccepted > 0) {
           problemResults[problem.id] = {
             solved: false,
-            penalty: problemState.wrongAttemptsBeforeAccepted * 20,
+            penalty: problemState.wrongAttemptsBeforeAccepted * 10,
             wrongAttempts: problemState.wrongAttemptsBeforeAccepted,
           };
         }

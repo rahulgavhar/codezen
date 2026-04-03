@@ -12,7 +12,7 @@ CREATE TABLE public.problems (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
   -- Identity
-  title TEXT NOT NULL
+  title TEXT NOT NULL UNIQUE
     CHECK (char_length(title) BETWEEN 5 AND 150),
 
   -- URL-safe unique identifier

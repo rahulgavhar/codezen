@@ -6,6 +6,7 @@ import GuestHeader from "../../components/GuestHeader";
 import Footer from "../../components/Footer";
 import CodeReplay from "./CodeReplay";
 import axiosInstance from "../../lib/axios";
+import toast from "react-hot-toast";
 
 const getContestStatus = (contest) => {
   const now = new Date();
@@ -18,6 +19,12 @@ const getContestStatus = (contest) => {
 };
 
 const INDIA_TIMEZONE = "Asia/Kolkata";
+
+const contestLifecycleToastStyle = {
+  border: "1px solid rgba(34, 211, 238, 0.35)",
+  background: "rgba(15, 23, 42, 0.96)",
+  color: "#e2e8f0",
+};
 
 const formatDateTime = (value) => {
   if (!value) return "-";
@@ -278,7 +285,7 @@ const Contest = () => {
             0,
             Math.floor((problemState.acceptedAt.getTime() - startTime) / (1000 * 60))
           );
-          const problemPenalty = diffMinutes + problemState.wrongAttemptsBeforeAccepted * 20;
+          const problemPenalty = diffMinutes + problemState.wrongAttemptsBeforeAccepted * 10;
 
           problemResults[problem.id] = {
             solved: true,
@@ -291,7 +298,7 @@ const Contest = () => {
         if (problemState.wrongAttemptsBeforeAccepted > 0) {
           problemResults[problem.id] = {
             solved: false,
-            penalty: problemState.wrongAttemptsBeforeAccepted * 20,
+            penalty: problemState.wrongAttemptsBeforeAccepted * 10,
             wrongAttempts: problemState.wrongAttemptsBeforeAccepted,
           };
         }
@@ -433,7 +440,16 @@ const Contest = () => {
         !hasStartedPopupShownRef.current
       ) {
         hasStartedPopupShownRef.current = true;
-        alert("Contest has begun. Redirecting to ongoing contest.");
+        toast.success("Contest has begun. Redirecting to ongoing contest.", {
+          id: "contest-started-toast",
+          position: "top-center",
+          duration: 2800,
+          style: contestLifecycleToastStyle,
+          iconTheme: {
+            primary: "#22d3ee",
+            secondary: "#0f172a",
+          },
+        });
         navigate(`/contest/${id}/ongoing`, { replace: true });
       }
 

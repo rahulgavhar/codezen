@@ -25,11 +25,14 @@ router.put('/judge0', async (req, res) => {
 
     console.log(`Webhook received for Judge0 token: ${judge0Data.token}`);
 
-    // Fetch latest submission details directly from Judge0 with base64_encoded=false.
+    // Fetch latest submission details directly from Judge0.
+    // For C++ (language_id 54), service uses base64_encoded=true and decodes output fields.
     // Fallback to webhook payload if Judge0 fetch fails.
     let resolvedJudge0Data = judge0Data;
     try {
-      resolvedJudge0Data = await judge0Service.getSubmissionFromJudge0(judge0Data.token);
+      resolvedJudge0Data = await judge0Service.getSubmissionFromJudge0(judge0Data.token, {
+        languageId: judge0Data?.language_id,
+      });
     } catch (fetchErr) {
       console.warn(`Failed to fetch Judge0 details for token ${judge0Data.token}, using webhook payload:`, fetchErr.message);
     }

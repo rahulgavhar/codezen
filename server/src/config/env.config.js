@@ -21,6 +21,8 @@ export const ENV = {
   RESOURCE_GROUP: process.env.RESOURCE_GROUP || "",
   VM_NAME: process.env.VM_NAME || "",
   GROQ_API_KEY: process.env.GROQ_API_KEY || "",
+  MAX_REQUEST_BODY_LIMIT: process.env.MAX_REQUEST_BODY_LIMIT || "20mb",
+  MAX_SOURCE_CODE_BYTES: process.env.MAX_SOURCE_CODE_BYTES || "2097152",
   REPLAY_STORAGE_BUCKET: process.env.REPLAY_STORAGE_BUCKET || "contest_submission_events",
   REPLAY_FLUSH_INTERVAL_MS: process.env.REPLAY_FLUSH_INTERVAL_MS || "2000",
   REPLAY_FLUSH_EVENT_THRESHOLD: process.env.REPLAY_FLUSH_EVENT_THRESHOLD || "500",

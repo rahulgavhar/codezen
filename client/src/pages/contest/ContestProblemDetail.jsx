@@ -5,6 +5,7 @@ import Editor from "@monaco-editor/react";
 import { io } from "socket.io-client";
 import axiosInstance from "../../lib/axios";
 import { FaPlay } from "react-icons/fa";
+import toast from "react-hot-toast";
 
 const getContestStatus = (contest) => {
   if (!contest?.start_time || !contest?.end_time) return "Upcoming";
@@ -43,6 +44,17 @@ const toProblemCode = (displayOrder) => {
 
 const REPLAY_BATCH_SIZE = 50;
 const REPLAY_FLUSH_INTERVAL_MS = 500;
+const MAX_SOURCE_CODE_BYTES = Number(import.meta.env.VITE_MAX_SOURCE_CODE_BYTES || 2097152);
+
+const getUtf8Bytes = (value) => new TextEncoder().encode(String(value ?? "")).length;
+
+const getMaxSourceCodeMBLabel = () => (MAX_SOURCE_CODE_BYTES / (1024 * 1024)).toFixed(2);
+
+const contestLifecycleToastStyle = {
+  border: "1px solid rgba(250, 204, 21, 0.35)",
+  background: "rgba(15, 23, 42, 0.96)",
+  color: "#e2e8f0",
+};
 
 const getSocketServerUrl = () => {
   const apiUrl = import.meta.env.VITE_API_URL;
@@ -493,7 +505,12 @@ class Main {
 
       if (!hasContestEndPopupShownRef.current) {
         hasContestEndPopupShownRef.current = true;
-        alert("Contest has ended.");
+        toast("Contest has ended. Redirecting to contest page.", {
+          id: "contest-ended-detail-toast",
+          position: "top-center",
+          duration: 2800,
+          style: contestLifecycleToastStyle,
+        });
         navigate(`/contest/${id}/info`, { replace: true });
       }
     };
@@ -598,6 +615,12 @@ class Main {
       return;
     }
 
+    const sourceBytes = getUtf8Bytes(code);
+    if (sourceBytes > MAX_SOURCE_CODE_BYTES) {
+      alert(`Code is too large. Max allowed is ${getMaxSourceCodeMBLabel()} MB.`);
+      return;
+    }
+
     if (samples.length === 0) {
       alert("No sample test cases available");
       return;
@@ -683,6 +706,12 @@ class Main {
       return;
     }
 
+    const sourceBytes = getUtf8Bytes(code);
+    if (sourceBytes > MAX_SOURCE_CODE_BYTES) {
+      alert(`Code is too large. Max allowed is ${getMaxSourceCodeMBLabel()} MB.`);
+      return;
+    }
+
     if (!problem?.problem_id) {
       alert("Problem data is not available");
       return;
@@ -721,6 +750,12 @@ class Main {
   const handleSubmit = async () => {
     if (!code.trim()) {
       alert("Please write some code first");
+      return;
+    }
+
+    const sourceBytes = getUtf8Bytes(code);
+    if (sourceBytes > MAX_SOURCE_CODE_BYTES) {
+      alert(`Code is too large. Max allowed is ${getMaxSourceCodeMBLabel()} MB.`);
       return;
     }
 

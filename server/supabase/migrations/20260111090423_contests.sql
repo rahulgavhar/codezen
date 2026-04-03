@@ -14,8 +14,8 @@ CREATE TABLE public.contests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
   -- Identity
-  title TEXT NOT NULL
-    CHECK (char_length(title) BETWEEN 5 AND 150),
+  title TEXT NOT NULL UNIQUE
+    CHECK (char_length(title) BETWEEN 5 AND 20),
 
   description TEXT,
 
