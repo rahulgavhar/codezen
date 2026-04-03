@@ -329,3 +329,76 @@ export async function fetchContestRegistrants(contestId, options = {}) {
 		},
 	};
 }
+
+export async function fetchContestRegistrant(contestId, clerkUserId) {
+	ensureSupabaseConfigured();
+
+	const { data, error } = await supabase
+		.from('contest_registrations')
+		.select('contest_id, clerk_user_id')
+		.eq('contest_id', contestId)
+		.eq('clerk_user_id', clerkUserId)
+		.maybeSingle();
+
+	if (error) {
+		throw error;
+	}
+
+	return data || null;
+}
+
+export async function insertContestRegistrant(contestId, clerkUserId) {
+	ensureSupabaseConfigured();
+
+	const { data, error } = await supabase
+		.from('contest_registrations')
+		.insert({
+			contest_id: contestId,
+			clerk_user_id: clerkUserId,
+		})
+		.select('contest_id, clerk_user_id')
+		.single();
+
+	if (error) {
+		throw error;
+	}
+
+	return data;
+}
+
+export async function fetchAllContestRegistrants(contestId) {
+	ensureSupabaseConfigured();
+
+	const { data, error } = await supabase
+		.from('contest_registrations')
+		.select(`
+			contest_id,
+			clerk_user_id,
+			user_profiles (
+				username,
+				display_name,
+				avatar_url,
+				last_active_at
+			)
+		`)
+		.eq('contest_id', contestId)
+		.order('clerk_user_id', { ascending: true });
+
+	if (error) {
+		throw error;
+	}
+
+	return (data || []).map((item) => {
+		const profile = Array.isArray(item.user_profiles)
+			? item.user_profiles[0]
+			: item.user_profiles;
+
+		return {
+			clerk_user_id: item.clerk_user_id,
+			username: profile?.username || null,
+			display_name: profile?.display_name || null,
+			avatar_url: profile?.avatar_url || null,
+			last_active_at: profile?.last_active_at || null,
+		};
+	});
+}

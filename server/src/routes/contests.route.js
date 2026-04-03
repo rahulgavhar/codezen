@@ -15,5 +15,8 @@ router.get('/:contestId/problems', contestsController.getContestProblems);
 router.get('/:contestId/submissions', contestsController.getContestSubmissions);
 router.post('/:contestId/submissions', contestsController.createContestSubmission);
 router.get('/:contestId/registrants', contestsController.getContestRegistrants);
+router.get('/:contestId/registration-status', contestsController.getContestRegistrationStatus);
+router.post('/:contestId/register', contestsController.registerForContest);
+router.get('/:contestId/leaderboard', contestsController.getContestLeaderboard);
 
 export default router;

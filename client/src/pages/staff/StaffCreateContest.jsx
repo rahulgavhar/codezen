@@ -435,6 +435,7 @@ const StaffCreateContest = () => {
                         <div>
                           <p className="text-xs text-slate-400">Original Description</p>
                           <div className="mt-1 max-h-36 overflow-y-auto rounded border border-white/10 bg-black/20 p-3 text-sm text-slate-200">
+                            <style>{'.katex-html { display: none; }'}</style>
                             <div dangerouslySetInnerHTML={{ __html: problemPreview.description || 'No description' }} />
                           </div>
                         </div>
@@ -458,6 +459,18 @@ const StaffCreateContest = () => {
                           placeholder="AI transformed description will appear here. You can edit it manually."
                           className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-50 placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
                         />
+
+                        <div>
+                          <p className="text-xs text-slate-400">Gemini Description Preview</p>
+                          <div className="mt-1 max-h-36 overflow-y-auto rounded border border-white/10 bg-black/20 p-3 text-sm text-slate-200">
+                            <style>{'.katex-html { display: none; }'}</style>
+                            <div
+                              dangerouslySetInnerHTML={{
+                                __html: problemPreview.gemini_description || 'No transformed description',
+                              }}
+                            />
+                          </div>
+                        </div>
 
                         <button
                           type="button"

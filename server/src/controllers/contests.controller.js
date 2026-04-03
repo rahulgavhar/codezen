@@ -142,6 +142,62 @@ export async function getContestRegistrants(req, res, next) {
 	}
 }
 
+export async function getContestRegistrationStatus(req, res, next) {
+	try {
+		const clerkUserId = getAuthUserId(req);
+		if (!clerkUserId) {
+			return res.status(401).json({
+				success: false,
+				message: 'Unauthorized',
+			});
+		}
+
+		const { contestId } = req.params;
+		const status = await contestService.getContestRegistrationStatus(contestId, clerkUserId);
+		return res.status(200).json(status);
+	} catch (error) {
+		console.error('Error in getContestRegistrationStatus:', error);
+		next(error);
+	}
+}
+
+export async function registerForContest(req, res, next) {
+	try {
+		const clerkUserId = getAuthUserId(req);
+		if (!clerkUserId) {
+			return res.status(401).json({
+				success: false,
+				message: 'Unauthorized',
+			});
+		}
+
+		const { contestId } = req.params;
+		const result = await contestService.registerForContest(contestId, clerkUserId);
+		return res.status(200).json(result);
+	} catch (error) {
+		console.error('Error in registerForContest:', error);
+		next(error);
+	}
+}
+
+export async function getContestLeaderboard(req, res, next) {
+	try {
+		const { contestId } = req.params;
+		const page = req.query?.page;
+		const limit = req.query?.limit;
+
+		const leaderboardResult = await contestService.getContestLeaderboard(contestId, {
+			page,
+			limit,
+		});
+
+		return res.status(200).json(leaderboardResult);
+	} catch (error) {
+		console.error('Error in getContestLeaderboard:', error);
+		next(error);
+	}
+}
+
 /**
  * GET /api/contests/problems/:problemId
  * Fetch problem data used while assembling contest problem snapshots.

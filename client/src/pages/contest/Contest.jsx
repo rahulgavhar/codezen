@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import Header from "../../components/Header";
 import GuestHeader from "../../components/GuestHeader";
 import Footer from "../../components/Footer";
+import CodeReplay from "./CodeReplay";
 import axiosInstance from "../../lib/axios";
 
 const getContestStatus = (contest) => {
@@ -48,6 +49,19 @@ const formatCountdown = (targetDate) => {
     .join(":");
 };
 
+const toProblemCode = (displayOrder, fallbackIndex = 0) => {
+  const normalizedOrder =
+    Number.isInteger(displayOrder) && displayOrder >= 1
+      ? displayOrder
+      : fallbackIndex + 1;
+
+  if (normalizedOrder <= 26) {
+    return String.fromCharCode(64 + normalizedOrder);
+  }
+
+  return `P${normalizedOrder}`;
+};
+
 const Contest = () => {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -59,6 +73,22 @@ const Contest = () => {
   const [contest, setContest] = useState(null);
   const [problems, setProblems] = useState([]);
   const [registrantsTotal, setRegistrantsTotal] = useState(0);
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [isCheckingRegistration, setIsCheckingRegistration] = useState(false);
+  const [isRegistered, setIsRegistered] = useState(false);
+  const [submissions, setSubmissions] = useState([]);
+  const [leaderboardRows, setLeaderboardRows] = useState([]);
+  const [leaderboardPagination, setLeaderboardPagination] = useState({
+    page: 1,
+    limit: 10,
+    count: 0,
+    total: 0,
+    pages: 0,
+  });
+  const [leaderboardPage, setLeaderboardPage] = useState(1);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [leaderboardError, setLeaderboardError] = useState("");
+  const [activeReplay, setActiveReplay] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -96,7 +126,240 @@ const Contest = () => {
   useEffect(() => {
     previousStatusRef.current = null;
     hasStartedPopupShownRef.current = false;
+    setLeaderboardPage(1);
   }, [id]);
+
+  useEffect(() => {
+    const fetchRegistrationStatus = async () => {
+      if (!id || !isSignedIn) {
+        setIsRegistered(false);
+        return;
+      }
+
+      try {
+        setIsCheckingRegistration(true);
+        const response = await axiosInstance.get(`/api/contests/${id}/registration-status`);
+        setIsRegistered(Boolean(response.data?.registered));
+      } catch (err) {
+        console.error("Failed to fetch registration status:", err);
+        setIsRegistered(false);
+      } finally {
+        setIsCheckingRegistration(false);
+      }
+    };
+
+    fetchRegistrationStatus();
+  }, [id, isSignedIn]);
+
+  useEffect(() => {
+    const fetchLeaderboard = async () => {
+      if (!id || !contest) {
+        return;
+      }
+
+      if (getContestStatus(contest) !== "Ended") {
+        setLeaderboardRows([]);
+        setLeaderboardError("");
+        return;
+      }
+
+      try {
+        setLeaderboardLoading(true);
+        setLeaderboardError("");
+        const response = await axiosInstance.get(`/api/contests/${id}/leaderboard`, {
+          params: {
+            page: leaderboardPage,
+            limit: leaderboardPagination.limit,
+          },
+        });
+
+        const data = Array.isArray(response.data?.data) ? response.data.data : [];
+        const pagination = response.data?.pagination || {
+          page: leaderboardPage,
+          limit: leaderboardPagination.limit,
+          count: data.length,
+          total: data.length,
+          pages: data.length > 0 ? 1 : 0,
+        };
+
+        setLeaderboardRows(data);
+        setLeaderboardPagination(pagination);
+      } catch (err) {
+        console.error("Failed to fetch contest leaderboard:", err);
+        setLeaderboardRows([]);
+        setLeaderboardError(
+          err.response?.data?.message || "Failed to load leaderboard"
+        );
+      } finally {
+        setLeaderboardLoading(false);
+      }
+    };
+
+    fetchLeaderboard();
+  }, [contest, id, leaderboardPage, leaderboardPagination.limit]);
+
+  useEffect(() => {
+    const fetchSubmissions = async () => {
+      if (!id || !contest || getContestStatus(contest) !== "Ended") {
+        setSubmissions([]);
+        return;
+      }
+
+      try {
+        const response = await axiosInstance.get(`/api/contests/${id}/submissions`);
+        setSubmissions(Array.isArray(response.data) ? response.data : []);
+      } catch (err) {
+        console.error("Failed to fetch contest submissions:", err);
+        setSubmissions([]);
+      }
+    };
+
+    fetchSubmissions();
+  }, [contest, id]);
+
+  const postContestStandings = useMemo(() => {
+    if (!contest?.start_time || !Array.isArray(leaderboardRows) || leaderboardRows.length === 0) {
+      return [];
+    }
+
+    const startTime = new Date(contest.start_time).getTime();
+    if (Number.isNaN(startTime)) {
+      return [];
+    }
+
+    const submissionsAsc = [...submissions].sort(
+      (a, b) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime()
+    );
+
+    return leaderboardRows.map((row) => {
+      const perProblem = {};
+
+      problems.forEach((problem) => {
+        perProblem[problem.id] = {
+          acceptedAt: null,
+          wrongAttemptsBeforeAccepted: 0,
+        };
+      });
+
+      submissionsAsc.forEach((entry) => {
+        if (entry.clerk_user_id !== row.userId) return;
+
+        const problemState = perProblem[entry.contest_problem_id];
+        if (!problemState) return;
+
+        if (!problemState.acceptedAt && entry.verdict === "accepted") {
+          problemState.acceptedAt = new Date(entry.submitted_at);
+          return;
+        }
+
+        if (!problemState.acceptedAt && entry.verdict && entry.verdict !== "pending") {
+          problemState.wrongAttemptsBeforeAccepted += 1;
+        }
+      });
+
+      const problemResults = {};
+
+      problems.forEach((problem) => {
+        const problemState = perProblem[problem.id];
+        if (!problemState) return;
+
+        if (problemState.acceptedAt) {
+          const diffMinutes = Math.max(
+            0,
+            Math.floor((problemState.acceptedAt.getTime() - startTime) / (1000 * 60))
+          );
+          const problemPenalty = diffMinutes + problemState.wrongAttemptsBeforeAccepted * 20;
+
+          problemResults[problem.id] = {
+            solved: true,
+            penalty: problemPenalty,
+            wrongAttempts: problemState.wrongAttemptsBeforeAccepted,
+          };
+          return;
+        }
+
+        if (problemState.wrongAttemptsBeforeAccepted > 0) {
+          problemResults[problem.id] = {
+            solved: false,
+            penalty: problemState.wrongAttemptsBeforeAccepted * 20,
+            wrongAttempts: problemState.wrongAttemptsBeforeAccepted,
+          };
+        }
+      });
+
+      return {
+        ...row,
+        problemResults,
+      };
+    });
+  }, [contest?.start_time, leaderboardRows, problems, submissions]);
+
+  const openReplay = (row, problem, result) => {
+    const acceptedSubmission = submissions
+      .filter(
+        (entry) =>
+          entry.clerk_user_id === row.userId &&
+          entry.contest_problem_id === problem.id &&
+          entry.verdict === "accepted"
+      )
+      .sort((a, b) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime())[0];
+
+    setActiveReplay({
+      rank: row.rank,
+      handle: row.handle,
+      problemCode: toProblemCode(problem.display_order),
+      problemTitle: problem.title,
+      penalty: result.penalty,
+      sourceCode: acceptedSubmission?.source_code || "",
+      submittedAt: acceptedSubmission?.submitted_at || null,
+    });
+  };
+
+  const handleRegister = async () => {
+    if (!isSignedIn) {
+      navigate("/sign-in");
+      return;
+    }
+
+    try {
+      setIsRegistering(true);
+      const response = await axiosInstance.post(`/api/contests/${id}/register`);
+      const alreadyRegistered = Boolean(response.data?.alreadyRegistered);
+
+      if (!alreadyRegistered) {
+        setRegistrantsTotal((current) => current + 1);
+      }
+
+      setIsRegistered(true);
+      alert(alreadyRegistered ? "You are already registered." : "Registered successfully.");
+    } catch (err) {
+      console.error("Failed to register for contest:", err);
+      alert(err.response?.data?.message || "Failed to register for contest.");
+    } finally {
+      setIsRegistering(false);
+    }
+  };
+
+  const handleContestAction = async (status) => {
+    if (status === "Live") {
+      if (!isSignedIn) {
+        navigate("/sign-in");
+        return;
+      }
+
+      if (!isRegistered) {
+        alert("Only registered participants can join this contest.");
+        return;
+      }
+
+      navigate(`/contest/${id}/ongoing`);
+      return;
+    }
+
+    if (status === "Upcoming") {
+      await handleRegister();
+    }
+  };
 
   useEffect(() => {
     if (!contest) {
@@ -120,6 +383,8 @@ const Contest = () => {
       if (
         previousStatusRef.current === "Upcoming" &&
         status === "Live" &&
+        isSignedIn &&
+        isRegistered &&
         !hasStartedPopupShownRef.current
       ) {
         hasStartedPopupShownRef.current = true;
@@ -133,7 +398,7 @@ const Contest = () => {
     updateLifecycle();
     const intervalId = setInterval(updateLifecycle, 1000);
     return () => clearInterval(intervalId);
-  }, [contest, id, navigate]);
+  }, [contest, id, isRegistered, isSignedIn, navigate]);
 
   if (loading) {
     return (
@@ -170,12 +435,23 @@ const Contest = () => {
   const status = getContestStatus(contest);
 
   const ctaText = status === "Live"
-    ? "Join contest"
+    ? !isSignedIn
+      ? "Sign in to join"
+      : isCheckingRegistration
+        ? "Checking registration..."
+        : isRegistered
+          ? "Join contest"
+          : "Only registrants can join"
     : status === "Upcoming"
-      ? "Contest not started"
+      ? isRegistered
+        ? "Registered"
+        : "Register"
       : "Contest ended";
 
-  const ctaDisabled = status !== "Live" || !isSignedIn;
+  const ctaDisabled =
+    status === "Ended" ||
+    (status === "Live" && isSignedIn && (isCheckingRegistration || !isRegistered)) ||
+    (status === "Upcoming" && (isRegistering || isCheckingRegistration || isRegistered));
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col">
@@ -211,10 +487,10 @@ const Contest = () => {
             </h1>
             <button
               disabled={ctaDisabled}
-              onClick={() => navigate(`/contest/${id}/ongoing`)}
+              onClick={() => handleContestAction(status)}
               className="inline-flex items-center justify-center rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-cyan-600/20 transition hover:bg-cyan-500 disabled:bg-slate-700 disabled:cursor-not-allowed"
             >
-              {ctaText}
+              {isRegistering ? "Registering..." : ctaText}
             </button>
           </div>
 
@@ -250,7 +526,7 @@ const Contest = () => {
                     >
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-sm font-semibold text-cyan-200">
-                          {String.fromCharCode(65 + index)}. {problem.title || problem.problem?.title || "Untitled problem"}
+                          {toProblemCode(problem.display_order, index)}. {problem.title || problem.problem?.title || "Untitled problem"}
                         </p>
                         <span className="text-xs text-slate-300">{problem.points} pts</span>
                       </div>
@@ -343,7 +619,142 @@ const Contest = () => {
             </button>
           </div>
         </section>
+
+        {status === "Ended" && (
+          <section className="rounded-2xl border border-white/10 bg-slate-900/80 p-6 shadow-xl shadow-slate-900/30">
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">Post Contest Leaderboard</h2>
+                <p className="text-xs text-slate-400">Final rankings after contest end</p>
+              </div>
+              <span className="rounded-full border border-cyan-600/80 px-3 py-1 text-xs font-semibold text-white">
+                {leaderboardPagination.total} ranked
+              </span>
+            </div>
+
+            {leaderboardLoading ? (
+              <div className="rounded-xl border border-white/10 bg-slate-950/60 px-4 py-8 text-center text-sm text-slate-300">
+                Loading leaderboard...
+              </div>
+            ) : leaderboardError ? (
+              <div className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-6 text-sm text-rose-200">
+                {leaderboardError}
+              </div>
+            ) : (
+              <>
+                <div className="overflow-hidden rounded-xl border border-white/5">
+                  <table className="w-full min-w-225 text-sm">
+                    <thead className="bg-white/5 text-slate-300">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-semibold">Rank</th>
+                        <th className="px-4 py-3 text-left font-semibold">Handle</th>
+                        {problems.map((problem, index) => (
+                          <th key={problem.id} className="px-4 py-3 text-center font-semibold">
+                            {toProblemCode(problem.display_order, index)}
+                          </th>
+                        ))}
+                        <th className="px-4 py-3 text-left font-semibold">Solved</th>
+                        <th className="px-4 py-3 text-left font-semibold">Penalty</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {postContestStandings.length === 0 ? (
+                        <tr>
+                          <td className="px-4 py-6 text-center text-slate-400" colSpan={problems.length + 4}>
+                            No leaderboard data available.
+                          </td>
+                        </tr>
+                      ) : (
+                        postContestStandings.map((row) => (
+                          <tr key={row.userId} className="hover:bg-white/5">
+                            <td className="px-4 py-3 font-semibold text-cyan-200">{row.rank}</td>
+                            <td className="px-4 py-3 font-medium text-slate-100">{row.handle}</td>
+                            {problems.map((problem) => {
+                              const result = row.problemResults?.[problem.id];
+
+                              if (!result) {
+                                return <td key={`${row.rank}-${problem.id}`} className="px-4 py-3 text-center text-slate-500" />;
+                              }
+
+                              return (
+                                <td key={`${row.rank}-${problem.id}`} className="group relative px-4 py-3 text-center">
+                                  {result.solved ? (
+                                    <>
+                                      <span className="block font-semibold text-emerald-400 transition-opacity duration-150 group-hover:opacity-0">
+                                        +{result.penalty}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => openReplay(row, problem, result)}
+                                        className="pointer-events-none absolute inset-0 z-10 m-auto h-fit w-fit rounded-md border border-cyan-400/50 bg-cyan-500/15 px-2 py-1 text-[11px] font-semibold text-cyan-200 opacity-0 shadow-lg shadow-cyan-900/30 transition duration-150 group-hover:pointer-events-auto group-hover:opacity-100 hover:bg-cyan-500/25"
+                                      >
+                                        Play
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <span className="font-semibold text-rose-300">-{result.penalty}</span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                            <td className="px-4 py-3 text-slate-300">{row.solved}</td>
+                            <td className="px-4 py-3 text-slate-300">{row.penalty}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {leaderboardPagination.pages > 1 && (
+                  <div className="mt-4 flex items-center justify-between gap-3 text-xs text-slate-300">
+                    <button
+                      type="button"
+                      onClick={() => setLeaderboardPage((current) => Math.max(1, current - 1))}
+                      disabled={leaderboardPagination.page <= 1}
+                      className="rounded-md border border-white/15 bg-white/5 px-3 py-1.5 font-semibold transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+                    <span>
+                      Page {leaderboardPagination.page} of {leaderboardPagination.pages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setLeaderboardPage((current) =>
+                          Math.min(leaderboardPagination.pages, current + 1)
+                        )
+                      }
+                      disabled={leaderboardPagination.page >= leaderboardPagination.pages}
+                      className="rounded-md border border-white/15 bg-white/5 px-3 py-1.5 font-semibold transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+        )}
       </main>
+
+      {activeReplay && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/80 px-2 py-4 backdrop-blur-sm sm:px-4">
+          <div className="relative h-full w-[98vw] max-h-[96vh] overflow-hidden rounded-2xl border border-cyan-400/40 bg-slate-950 shadow-2xl shadow-cyan-900/40">
+            <button
+              type="button"
+              onClick={() => setActiveReplay(null)}
+              className="absolute top-3 right-3 z-20 rounded-full border border-white/20 bg-black/40 px-3 py-1 text-xs font-semibold text-slate-100 transition hover:border-cyan-400/60"
+            >
+              Close
+            </button>
+            <div className="h-full overflow-hidden p-2 sm:p-3">
+              <CodeReplay replay={activeReplay} />
+            </div>
+          </div>
+        </div>
+      )}
 
       <Footer />
     </div>

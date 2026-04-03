@@ -4,14 +4,24 @@ import { useUser } from "@clerk/clerk-react";
 import { useSelector } from "react-redux";
 import Header from "../../components/Header";
 import Footer from "../../components/Footer";
-import CodeReplay from "./CodeReplay";
 import axiosInstance from "../../lib/axios";
 
-const toProblemCode = (index) => {
-  if (index < 26) {
-    return String.fromCharCode(65 + index);
+const toProblemCode = (displayOrder, fallbackIndex = 0) => {
+  const normalizedOrder =
+    Number.isInteger(displayOrder) && displayOrder >= 1
+      ? displayOrder
+      : fallbackIndex + 1;
+
+  if (normalizedOrder <= 26) {
+    return String.fromCharCode(64 + normalizedOrder);
   }
-  return `P${index + 1}`;
+
+  return `P${normalizedOrder}`;
+};
+
+const formatProblemTitle = (title, displayOrder, fallbackIndex = 0) => {
+  const code = toProblemCode(displayOrder, fallbackIndex);
+  return `${code}. ${title || "Untitled problem"}`;
 };
 
 const formatVerdictLabel = (value) => {
@@ -64,10 +74,11 @@ const formatCountdown = (targetDate) => {
 const OngoingContest = () => {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { user } = useUser();
+  const { user, isLoaded, isSignedIn } = useUser();
   const hasEndPopupShownRef = useRef(false);
   const profile = useSelector((state) => state.user?.profile);
   const [activeTab, setActiveTab] = useState("problems");
+  const [isAccessChecking, setIsAccessChecking] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [contest, setContest] = useState(null);
@@ -76,7 +87,6 @@ const OngoingContest = () => {
   const [problems, setProblems] = useState([]);
   const [submissions, setSubmissions] = useState([]);
   const [registrants, setRegistrants] = useState([]);
-  const [activeReplay, setActiveReplay] = useState(null);
 
   useEffect(() => {
     hasEndPopupShownRef.current = false;
@@ -87,6 +97,40 @@ const OngoingContest = () => {
       navigate("/staff/dashboard", { replace: true });
     }
   }, [navigate, profile?.app_role]);
+
+  useEffect(() => {
+    const verifyAccess = async () => {
+      if (!id || !isLoaded) {
+        return;
+      }
+
+      if (!isSignedIn) {
+        alert("Please sign in to join the contest.");
+        navigate("/sign-in", { replace: true });
+        return;
+      }
+
+      try {
+        const statusResponse = await axiosInstance.get(
+          `/api/contests/${id}/registration-status`
+        );
+
+        if (!statusResponse.data?.registered) {
+          alert("Only registered participants can join this contest.");
+          navigate(`/contest/${id}`, { replace: true });
+          return;
+        }
+
+        setIsAccessChecking(false);
+      } catch (err) {
+        console.error("Failed to verify contest access:", err);
+        alert("Unable to verify contest registration.");
+        navigate(`/contest/${id}`, { replace: true });
+      }
+    };
+
+    verifyAccess();
+  }, [id, isLoaded, isSignedIn, navigate]);
 
   useEffect(() => {
     const fetchContestData = async () => {
@@ -106,7 +150,7 @@ const OngoingContest = () => {
         const incomingProblems = Array.isArray(problemsRes.data) ? problemsRes.data : [];
         const mappedProblems = incomingProblems.map((problem, index) => ({
           ...problem,
-          code: toProblemCode(index),
+          code: toProblemCode(problem.display_order, index),
         }));
 
         setContest(contestRes.data || null);
@@ -121,10 +165,10 @@ const OngoingContest = () => {
       }
     };
 
-    if (id) {
+    if (id && !isAccessChecking) {
       fetchContestData();
     }
-  }, [id]);
+  }, [id, isAccessChecking]);
 
   useEffect(() => {
     if (!contest?.start_time || !contest?.end_time) {
@@ -179,9 +223,11 @@ const OngoingContest = () => {
       .filter((entry) => entry.clerk_user_id === user.id)
       .map((entry) => {
         const matchingProblem = problems.find((problem) => problem.id === entry.contest_problem_id);
+        const rawTitle = entry.contest_problem?.title || matchingProblem?.title;
+        const displayOrder = entry.contest_problem?.display_order || matchingProblem?.display_order;
         return {
           ...entry,
-          title: entry.contest_problem?.title || matchingProblem?.title || "Untitled problem",
+          title: formatProblemTitle(rawTitle, displayOrder),
         };
       });
   }, [problems, submissions, user?.id]);
@@ -290,28 +336,7 @@ const OngoingContest = () => {
 
   const contestStatus = useMemo(() => getContestStatus(contest), [contest, countdown]);
 
-  const openReplay = (row, problem, result) => {
-    const acceptedSubmission = submissions
-      .filter(
-        (entry) =>
-          entry.clerk_user_id === row.userId &&
-          entry.contest_problem_id === problem.id &&
-          entry.verdict === "accepted"
-      )
-      .sort((a, b) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime())[0];
-
-    setActiveReplay({
-      rank: row.rank,
-      handle: row.handle,
-      problemCode: problem.code,
-      problemTitle: problem.title,
-      penalty: result.penalty,
-      sourceCode: acceptedSubmission?.source_code || "",
-      submittedAt: acceptedSubmission?.submitted_at || null,
-    });
-  };
-
-  if (loading) {
+  if (isAccessChecking || loading) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col">
         <Header />
@@ -416,7 +441,7 @@ const OngoingContest = () => {
                   {problems.map((p) => (
                     <tr key={p.id} className="hover:bg-white/5">
                       <td className="px-4 py-3 font-semibold text-cyan-200">{p.code}</td>
-                      <td className="px-4 py-3">{p.title}</td>
+                      <td className="px-4 py-3">{formatProblemTitle(p.title, p.display_order)}</td>
                       <td className="px-4 py-3 text-right text-slate-300">{submissionsByProblem.get(p.id) || 0}</td>
                       <td className="px-4 py-3 text-right">
                         <button
@@ -523,25 +548,9 @@ const OngoingContest = () => {
                         }
 
                         return (
-                          <td
-                            key={`${row.rank}-${problem.id}`}
-                            className={`px-4 py-3 text-center ${
-                              result.solved && contestStatus === "Ended" ? "group relative" : ""
-                            }`}
-                          >
+                          <td key={`${row.rank}-${problem.id}`} className="px-4 py-3 text-center">
                             {result.solved ? (
-                              <>
-                                <span className="font-semibold text-emerald-400">+{result.penalty}</span>
-                                {contestStatus === "Ended" && (
-                                  <button
-                                    type="button"
-                                    onClick={() => openReplay(row, problem, result)}
-                                    className="pointer-events-none absolute top-full left-1/2 z-10 mt-1 -translate-x-1/2 rounded-md border border-cyan-400/50 bg-cyan-500/15 px-2 py-1 text-[11px] font-semibold text-cyan-200 opacity-0 shadow-lg shadow-cyan-900/30 transition duration-150 group-hover:pointer-events-auto group-hover:opacity-100 hover:bg-cyan-500/25"
-                                  >
-                                    Play
-                                  </button>
-                                )}
-                              </>
+                              <span className="font-semibold text-emerald-400">+{result.penalty}</span>
                             ) : (
                               <span className="font-semibold text-rose-300">-{result.penalty}</span>
                             )}
@@ -559,24 +568,6 @@ const OngoingContest = () => {
         )}
 
       </main>
-
-      {activeReplay && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/80 px-2 py-4 backdrop-blur-sm sm:px-4">
-          <div className="relative h-full w-[98vw] max-h-[96vh] overflow-hidden rounded-2xl border border-cyan-400/40 bg-slate-950 shadow-2xl shadow-cyan-900/40">
-            <button
-              type="button"
-              onClick={() => setActiveReplay(null)}
-              className="absolute top-3 right-3 z-20 rounded-full border border-white/20 bg-black/40 px-3 py-1 text-xs font-semibold text-slate-100 transition hover:border-cyan-400/60"
-            >
-              Close
-            </button>
-            <div className="h-full overflow-hidden p-2 sm:p-3">
-              <CodeReplay replay={activeReplay} />
-            </div>
-          </div>
-        </div>
-      )}
-
       <Footer />
     </div>
   );

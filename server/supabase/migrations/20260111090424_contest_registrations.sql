@@ -32,33 +32,37 @@ ON public.contest_registrations (clerk_user_id);
 CREATE OR REPLACE FUNCTION validate_contest_registration()
 RETURNS TRIGGER AS $$ 
 DECLARE
-  contest_start timestamptz;
-  reg_deadline timestamptz;
-  max_participants INT;
-  current_count INT;
+  v_contest_start timestamptz;
+  v_reg_deadline timestamptz;
+  v_max_participants INT;
+  v_current_count INT;
 BEGIN
-  SELECT start_time, registration_deadline, max_participants
-  INTO contest_start, reg_deadline, max_participants
-  FROM public.contests
-  WHERE id = NEW.contest_id;
+  SELECT c.start_time, c.registration_deadline, c.max_participants
+  INTO v_contest_start, v_reg_deadline, v_max_participants
+  FROM public.contests c
+  WHERE c.id = NEW.contest_id;
+
+  IF v_contest_start IS NULL THEN
+    RAISE EXCEPTION 'Contest not found';
+  END IF;
 
   -- Contest started
-  IF now() >= contest_start THEN
+  IF now() >= v_contest_start THEN
     RAISE EXCEPTION 'Registration closed: contest already started';
   END IF;
 
   -- Deadline passed
-  IF reg_deadline IS NOT NULL AND now() > reg_deadline THEN
+  IF v_reg_deadline IS NOT NULL AND now() > v_reg_deadline THEN
     RAISE EXCEPTION 'Registration deadline has passed';
   END IF;
 
   -- Capacity check (IMPORTANT)
-  IF max_participants IS NOT NULL THEN
-    SELECT COUNT(*) INTO current_count
-    FROM public.contest_registrations
-    WHERE contest_id = NEW.contest_id;
+  IF v_max_participants IS NOT NULL THEN
+    SELECT COUNT(*) INTO v_current_count
+    FROM public.contest_registrations cr
+    WHERE cr.contest_id = NEW.contest_id;
 
-    IF current_count >= max_participants THEN
+    IF v_current_count >= v_max_participants THEN
       RAISE EXCEPTION 'Contest is full';
     END IF;
   END IF;

@@ -15,6 +15,23 @@ function parseDateOrThrow(value, fieldName) {
 	return parsed.toISOString();
 }
 
+function parsePageAndLimit(queryParams = {}, defaultLimit = 10, maxLimit = 50) {
+	let page = Number.parseInt(queryParams.page, 10);
+	let limit = Number.parseInt(queryParams.limit, 10);
+
+	if (Number.isNaN(page) || page < 1) {
+		page = 1;
+	}
+	if (Number.isNaN(limit) || limit < 1) {
+		limit = defaultLimit;
+	}
+
+	return {
+		page,
+		limit: Math.min(limit, maxLimit),
+	};
+}
+
 async function assertStaff(clerkUserId) {
 	const role = await contestsRepo.getUserRole(clerkUserId);
 	if (role !== 'staff') {
@@ -286,16 +303,200 @@ export async function createContestSubmission(contestId, clerkUserId, payload = 
 }
 
 export async function getContestRegistrants(contestId, queryParams = {}) {
-	let page = Number.parseInt(queryParams.page, 10);
-	let limit = Number.parseInt(queryParams.limit, 10);
-
-	if (Number.isNaN(page) || page < 1) {
-		page = 1;
-	}
-	if (Number.isNaN(limit) || limit < 1) {
-		limit = 10;
-	}
-	limit = Math.min(limit, 50);
+	const { page, limit } = parsePageAndLimit(queryParams, 10, 50);
 
 	return contestsRepo.fetchContestRegistrants(contestId, { page, limit });
+}
+
+export async function getContestRegistrationStatus(contestId, clerkUserId) {
+	if (!contestId) {
+		throw buildHttpError('contestId is required', 400);
+	}
+
+	const contest = await contestsRepo.fetchContestById(contestId);
+	if (!contest) {
+		throw buildHttpError('Contest not found', 404);
+	}
+
+	const registration = await contestsRepo.fetchContestRegistrant(contestId, clerkUserId);
+
+	return {
+		registered: Boolean(registration),
+	};
+}
+
+export async function registerForContest(contestId, clerkUserId) {
+	if (!contestId) {
+		throw buildHttpError('contestId is required', 400);
+	}
+
+	const contest = await contestsRepo.fetchContestById(contestId);
+	if (!contest) {
+		throw buildHttpError('Contest not found', 404);
+	}
+
+	const existing = await contestsRepo.fetchContestRegistrant(contestId, clerkUserId);
+	if (existing) {
+		return {
+			registered: true,
+			alreadyRegistered: true,
+		};
+	}
+
+	const now = new Date();
+	const startTime = new Date(contest.start_time);
+	if (!Number.isNaN(startTime.getTime()) && now >= startTime) {
+		throw buildHttpError('Registration closed: contest already started', 400);
+	}
+
+	try {
+		await contestsRepo.insertContestRegistrant(contestId, clerkUserId);
+	} catch (error) {
+		if (error?.code === '23505') {
+			return {
+				registered: true,
+				alreadyRegistered: true,
+			};
+		}
+		throw error;
+	}
+
+	return {
+		registered: true,
+		alreadyRegistered: false,
+	};
+}
+
+export async function getContestLeaderboard(contestId, queryParams = {}) {
+	if (!contestId) {
+		throw buildHttpError('contestId is required', 400);
+	}
+
+	const contest = await contestsRepo.fetchContestById(contestId);
+	if (!contest) {
+		throw buildHttpError('Contest not found', 404);
+	}
+
+	const { page, limit } = parsePageAndLimit(queryParams, 10, 50);
+	const contestProblems = await contestsRepo.fetchContestProblems(contestId);
+	const submissions = await contestsRepo.fetchContestSubmissions(contestId);
+	const registrants = await contestsRepo.fetchAllContestRegistrants(contestId);
+
+	const problems = Array.isArray(contestProblems) ? contestProblems : [];
+	if (problems.length === 0) {
+		return {
+			data: [],
+			pagination: {
+				page,
+				limit,
+				count: 0,
+				total: 0,
+				pages: 0,
+			},
+		};
+	}
+
+	const startTime = new Date(contest.start_time).getTime();
+	if (Number.isNaN(startTime)) {
+		throw buildHttpError('Contest start_time is invalid', 500);
+	}
+
+	const users = new Set();
+	registrants.forEach((item) => users.add(item.clerk_user_id));
+	submissions.forEach((item) => users.add(item.clerk_user_id));
+
+	const profileByUserId = new Map(
+		registrants.map((item) => [item.clerk_user_id, item])
+	);
+
+	const submissionsAsc = [...submissions].sort(
+		(a, b) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime()
+	);
+
+	const rows = Array.from(users).map((userId) => {
+		const profile = profileByUserId.get(userId);
+		const handle =
+			profile?.username ||
+			profile?.display_name ||
+			`${userId?.slice(0, 8) || 'user'}...`;
+
+		const perProblem = {};
+		let hasAttempted = false;
+		problems.forEach((problem) => {
+			perProblem[problem.id] = {
+				acceptedAt: null,
+				wrongAttemptsBeforeAccepted: 0,
+			};
+		});
+
+		submissionsAsc.forEach((entry) => {
+			if (entry.clerk_user_id !== userId) return;
+			if (entry.verdict && entry.verdict !== 'pending') {
+				hasAttempted = true;
+			}
+
+			const problemState = perProblem[entry.contest_problem_id];
+			if (!problemState) return;
+
+			if (!problemState.acceptedAt && entry.verdict === 'accepted') {
+				problemState.acceptedAt = new Date(entry.submitted_at);
+				return;
+			}
+
+			if (!problemState.acceptedAt && entry.verdict && entry.verdict !== 'pending') {
+				problemState.wrongAttemptsBeforeAccepted += 1;
+			}
+		});
+
+		let solved = 0;
+		let penalty = 0;
+
+		problems.forEach((problem) => {
+			const problemState = perProblem[problem.id];
+			if (!problemState?.acceptedAt) {
+				return;
+			}
+
+			const diffMinutes = Math.max(
+				0,
+				Math.floor((problemState.acceptedAt.getTime() - startTime) / (1000 * 60))
+			);
+			const problemPenalty = diffMinutes + problemState.wrongAttemptsBeforeAccepted * 20;
+
+			solved += 1;
+			penalty += problemPenalty;
+		});
+
+		return {
+			userId,
+			handle,
+			solved,
+			penalty,
+			hasAttempted,
+		};
+	});
+
+	const ranked = rows
+		.filter((row) => row.solved > 0 || row.hasAttempted)
+		.sort((a, b) => b.solved - a.solved || a.penalty - b.penalty || a.handle.localeCompare(b.handle))
+		.map((row, index) => ({
+			...row,
+			rank: index + 1,
+		}));
+
+	const total = ranked.length;
+	const pages = total === 0 ? 0 : Math.ceil(total / limit);
+	const startIndex = (page - 1) * limit;
+	const paginatedRows = ranked.slice(startIndex, startIndex + limit);
+
+	return {
+		data: paginatedRows,
+		pagination: {
+			page,
+			limit,
+			count: paginatedRows.length,
+			total,
+			pages,
+		},
+	};
 }

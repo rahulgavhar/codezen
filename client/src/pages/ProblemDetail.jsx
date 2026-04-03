@@ -59,6 +59,9 @@ class Main {
   const [isRunning, setIsRunning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedSampleIndex, setSelectedSampleIndex] = useState(0);
+  const [customInput, setCustomInput] = useState("");
+  const [customRunLoading, setCustomRunLoading] = useState(false);
+  const [customRunResult, setCustomRunResult] = useState(null);
   const [splitPosition, setSplitPosition] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
@@ -275,6 +278,42 @@ class Main {
       alert("Error running sample: " + (error.response?.data?.message || error.message));
     } finally {
       setIsRunning(false);
+    }
+  };
+
+  const handleRunCustomInput = async () => {
+    if (!code.trim()) {
+      alert("Please write some code first");
+      return;
+    }
+
+    try {
+      setCustomRunLoading(true);
+      setCustomRunResult(null);
+
+      const response = await axiosInstance.post("/api/submissions/run-sample", {
+        problem_id: id,
+        language,
+        source_code: code,
+        sample_input: customInput || "",
+      });
+
+      const result = response.data || {};
+      setCustomRunResult({
+        verdict: result.verdict || "unknown",
+        output: (result.stdout || "").trim(),
+        stderr: result.stderr || "",
+        compile_output: result.compile_output || "",
+        runtime: result.runtime_ms,
+      });
+    } catch (error) {
+      console.error("Error running custom input:", error);
+      setCustomRunResult({
+        verdict: "error",
+        error: error.response?.data?.message || error.message || "Failed to run custom input",
+      });
+    } finally {
+      setCustomRunLoading(false);
     }
   };
 
@@ -751,24 +790,26 @@ class Main {
               </div>
             )}
 
-            {activeTab === "examples" && samples.length > 0 && (
+            {activeTab === "examples" && (
               <div className="space-y-4">
                 {/* Sample Tabs */}
-                <div className="flex gap-2 border-b border-white/10 pb-3">
-                  {samples.map((_, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => setSelectedSampleIndex(idx)}
-                      className={`rounded px-3 py-1 text-xs font-semibold transition ${
-                        selectedSampleIndex === idx
-                          ? "border border-emerald-400 bg-emerald-400/20 text-emerald-200"
-                          : "text-slate-400 hover:text-slate-300"
-                      }`}
-                    >
-                      Example {idx + 1}
-                    </button>
-                  ))}
-                </div>
+                {samples.length > 0 && (
+                  <div className="flex gap-2 border-b border-white/10 pb-3">
+                    {samples.map((_, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setSelectedSampleIndex(idx)}
+                        className={`rounded px-3 py-1 text-xs font-semibold transition ${
+                          selectedSampleIndex === idx
+                            ? "border border-emerald-400 bg-emerald-400/20 text-emerald-200"
+                            : "text-slate-400 hover:text-slate-300"
+                        }`}
+                      >
+                        Example {idx + 1}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 {currentSample && (
                   <div className="space-y-4">
@@ -802,6 +843,69 @@ class Main {
                     )}
                   </div>
                 )}
+
+                {samples.length === 0 && (
+                  <div className="rounded border border-white/10 bg-slate-900/50 p-3 text-xs text-slate-400">
+                    No sample test cases available.
+                  </div>
+                )}
+
+                <div className="space-y-3 border-t border-white/10 pt-4">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-cyan-300">
+                    Custom Input Test
+                  </h4>
+                  <textarea
+                    value={customInput}
+                    onChange={(e) => setCustomInput(e.target.value)}
+                    className="w-full rounded border border-white/10 bg-slate-900/50 p-3 text-xs text-slate-200 outline-none transition focus:border-cyan-400/70"
+                    rows={6}
+                    placeholder="Enter custom input here"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleRunCustomInput}
+                    disabled={customRunLoading || isRunning || isSubmitting}
+                    className="btn btn-sm rounded-lg border border-white/10 bg-white/5 text-slate-50 transition hover:border-cyan-400/60 disabled:bg-slate-700 disabled:text-slate-400"
+                  >
+                    {customRunLoading ? "Running..." : "Run Custom Test"}
+                  </button>
+
+                  {customRunResult && (
+                    <div className="space-y-2 rounded border border-white/10 bg-slate-900/50 p-3 text-xs">
+                      <p className="text-slate-300">
+                        Verdict: <span className="font-semibold text-cyan-300">{customRunResult.verdict}</span>
+                        {typeof customRunResult.runtime === "number" ? ` (${customRunResult.runtime}ms)` : ""}
+                      </p>
+                      {customRunResult.error && (
+                        <p className="text-rose-300">{customRunResult.error}</p>
+                      )}
+                      {customRunResult.output !== undefined && (
+                        <div>
+                          <p className="mb-1 text-slate-400">My Output:</p>
+                          <pre className="max-h-36 overflow-auto rounded bg-slate-950 p-2 text-emerald-300">
+                            {customRunResult.output || "(empty)"}
+                          </pre>
+                        </div>
+                      )}
+                      {customRunResult.stderr && (
+                        <div>
+                          <p className="mb-1 text-slate-400">StdErr:</p>
+                          <pre className="max-h-36 overflow-auto rounded bg-slate-950 p-2 text-amber-300">
+                            {customRunResult.stderr}
+                          </pre>
+                        </div>
+                      )}
+                      {customRunResult.compile_output && (
+                        <div>
+                          <p className="mb-1 text-slate-400">Compile Output:</p>
+                          <pre className="max-h-36 overflow-auto rounded bg-slate-950 p-2 text-rose-300">
+                            {customRunResult.compile_output}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -975,7 +1079,7 @@ class Main {
                           {tc.expected && tc.verdict !== "pending" && (
                             <div>
                               <span className="text-slate-400">Expected: </span>
-                              <pre className="mt-1 rounded bg-slate-950 p-2 text-emerald-300 overflow-x-auto">
+                              <pre className="mt-1 max-h-36 overflow-auto rounded bg-slate-950 p-2 text-emerald-300">
                                 {tc.expected}
                               </pre>
                             </div>
@@ -984,7 +1088,7 @@ class Main {
                             <div>
                               <span className="text-slate-400">Output: </span>
                               <pre
-                                className={`mt-1 rounded bg-slate-950 p-2 overflow-x-auto ${
+                                className={`mt-1 max-h-36 overflow-auto rounded bg-slate-950 p-2 ${
                                   tc.passed
                                     ? "text-emerald-300"
                                     : "text-rose-300"

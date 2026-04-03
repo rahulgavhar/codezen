@@ -99,7 +99,7 @@ const CodeReplay = ({ replay }) => {
   return (
     <div className="flex h-full min-h-0 flex-col rounded-xl border border-white/10 bg-slate-950/95">
       <div className="flex flex-wrap items-center gap-2 border-b border-white/10 bg-slate-900/70 px-3 py-2">
-        <div className="min-w-40 flex-1">
+        <div className="min-w-20">
           <p className="text-xs font-semibold text-cyan-200">
             {replay?.problemCode || "P?"} • {replay?.problemTitle || "Untitled problem"}
           </p>
@@ -137,11 +137,17 @@ const CodeReplay = ({ replay }) => {
             onChange={(e) => setSpeed(Number(e.target.value))}
             className="rounded-md border border-white/15 bg-white/5 px-2 py-1 text-xs text-slate-100"
           >
-            <option value={0.5}>0.5x</option>
-            <option value={1}>1x</option>
-            <option value={1.5}>1.5x</option>
-            <option value={2}>2x</option>
-            <option value={4}>4x</option>
+            <option value={0.5} style={{ backgroundColor: "#000000", color: "#e2e8f0" }}>0.5x</option>
+            <option value={1} style={{ backgroundColor: "#000000", color: "#e2e8f0" }}>1x</option>
+            <option value={1.5} style={{ backgroundColor: "#000000", color: "#e2e8f0" }}>1.5x</option>
+            <option value={2} style={{ backgroundColor: "#000000", color: "#e2e8f0" }}>
+              2x
+            </option>
+            <option value={4} style={{ backgroundColor: "#000000", color: "#e2e8f0" }}>
+              4x
+            </option>
+            <option value={8} style={{ backgroundColor: "#000000", color: "#e2e8f0" }}>8x</option>
+            <option value={16} style={{ backgroundColor: "#000000", color: "#e2e8f0" }}>16x</option>
           </select>
         </label>
       </div>
