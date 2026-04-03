@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import Editor from "@monaco-editor/react";
+import { io } from "socket.io-client";
 import axiosInstance from "../../lib/axios";
 import { FaPlay } from "react-icons/fa";
 
@@ -40,11 +41,56 @@ const toProblemCode = (displayOrder) => {
   return `P${displayOrder}`;
 };
 
+const REPLAY_BATCH_SIZE = 50;
+const REPLAY_FLUSH_INTERVAL_MS = 500;
+
+const getSocketServerUrl = () => {
+  const apiUrl = import.meta.env.VITE_API_URL;
+  if (!apiUrl) return window.location.origin;
+  try {
+    return new URL(apiUrl).origin;
+  } catch {
+    return window.location.origin;
+  }
+};
+
+const emitWithAck = (socket, event, payload, timeoutMs = 10000) =>
+  new Promise((resolve, reject) => {
+    if (!socket || !socket.connected) {
+      reject(new Error("Socket is not connected"));
+      return;
+    }
+
+    let timeoutId = null;
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Socket ack timeout for ${event}`));
+    }, timeoutMs);
+
+    socket.emit(event, payload, (response) => {
+      clearTimeout(timeoutId);
+      if (response?.success === false) {
+        reject(new Error(response.error || `Socket event ${event} failed`));
+        return;
+      }
+      resolve(response || { success: true });
+    });
+  });
+
 const ContestProblemDetail = () => {
   const navigate = useNavigate();
   const { id, contestProblemId } = useParams();
-  const { isSignedIn } = useUser();
+  const { isSignedIn, user } = useUser();
   const hasContestEndPopupShownRef = useRef(false);
+  const replaySocketRef = useRef(null);
+  const replayTimelineIdRef = useRef("");
+  const replaySeqRef = useRef(0);
+  const replayBufferRef = useRef([]);
+  const replayFlushTimerRef = useRef(null);
+  const replayFlushInFlightRef = useRef(false);
+  const replaySessionReadyRef = useRef(false);
+  const replayFinalizedRef = useRef(false);
+  const replayCodeRef = useRef("");
+  const replayLanguageRef = useRef("cpp");
 
   const boilerplates = {
     javascript: `function solve() {
@@ -121,6 +167,122 @@ class Main {
   const selectedLanguageMeta =
     languageOptions.find((l) => l.value === language) || languageOptions[0];
 
+  useEffect(() => {
+    replayCodeRef.current = code;
+  }, [code]);
+
+  useEffect(() => {
+    replayLanguageRef.current = language;
+  }, [language]);
+
+  const flushReplayEvents = useCallback(
+    async (force = false) => {
+      if (replayFlushInFlightRef.current) {
+        return false;
+      }
+
+      const socket = replaySocketRef.current;
+      const timelineId = replayTimelineIdRef.current;
+      if (!socket || !socket.connected || !timelineId || !isSignedIn || !user?.id) {
+        return false;
+      }
+
+      if (replayBufferRef.current.length === 0) {
+        return true;
+      }
+
+      replayFlushInFlightRef.current = true;
+
+      try {
+        while (replayBufferRef.current.length > 0) {
+          const size = force
+            ? replayBufferRef.current.length
+            : Math.min(REPLAY_BATCH_SIZE, replayBufferRef.current.length);
+
+          const events = replayBufferRef.current.slice(0, size);
+          await emitWithAck(socket, "replay:events", {
+            contestId: id,
+            timelineId,
+            clerkUserId: user.id,
+            events,
+          });
+
+          replayBufferRef.current.splice(0, size);
+
+          if (!force) {
+            break;
+          }
+        }
+
+        return true;
+      } catch (error) {
+        console.warn("Replay flush failed:", error.message);
+        return false;
+      } finally {
+        replayFlushInFlightRef.current = false;
+      }
+    },
+    [id, isSignedIn, user?.id]
+  );
+
+  const queueReplayCodeEvent = useCallback(
+    (nextCode, source = "editor_change", eventLanguage = null) => {
+      if (!replaySessionReadyRef.current || replayFinalizedRef.current) {
+        return;
+      }
+
+      if (!replayTimelineIdRef.current || !isSignedIn || !user?.id) {
+        return;
+      }
+
+      replaySeqRef.current += 1;
+      replayBufferRef.current.push({
+        seq: replaySeqRef.current,
+        ts: Date.now(),
+        op: "set_code",
+        language: eventLanguage || replayLanguageRef.current,
+        source,
+        code: nextCode,
+      });
+
+      if (replayBufferRef.current.length >= REPLAY_BATCH_SIZE) {
+        void flushReplayEvents();
+      }
+    },
+    [flushReplayEvents, isSignedIn, user?.id]
+  );
+
+  const finalizeReplayTimeline = useCallback(
+    async (reason) => {
+      if (replayFinalizedRef.current || !replaySessionReadyRef.current) {
+        return;
+      }
+
+      const socket = replaySocketRef.current;
+      const timelineId = replayTimelineIdRef.current;
+
+      if (!socket || !socket.connected || !timelineId || !isSignedIn || !user?.id) {
+        return;
+      }
+
+      try {
+        await flushReplayEvents(true);
+        await emitWithAck(socket, "replay:finalize", {
+          contestId: id,
+          timelineId,
+          clerkUserId: user.id,
+          reason,
+        });
+
+        replayFinalizedRef.current = true;
+        replaySessionReadyRef.current = false;
+      } catch (error) {
+        console.warn("Replay finalize failed:", error.message);
+      }
+    },
+    [flushReplayEvents, id, isSignedIn, user?.id]
+  );
+
   // Fetch contest problem details
   useEffect(() => {
     const fetchProblem = async () => {
@@ -196,6 +358,115 @@ class Main {
   }, [id]);
 
   useEffect(() => {
+    const status = getContestStatus(contestMeta);
+
+    if (!isSignedIn || !user?.id || !id || !contestProblemId || status !== "Live") {
+      return undefined;
+    }
+
+    let disposed = false;
+    const socket = io(getSocketServerUrl(), {
+      autoConnect: false,
+      reconnection: true,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 2000,
+      reconnectionAttempts: 8,
+    });
+
+    replaySocketRef.current = socket;
+    replayFinalizedRef.current = false;
+    replaySessionReadyRef.current = false;
+    replayTimelineIdRef.current = "";
+    replayBufferRef.current = [];
+
+    const startFlushTimer = () => {
+      if (replayFlushTimerRef.current) {
+        clearInterval(replayFlushTimerRef.current);
+      }
+
+      replayFlushTimerRef.current = setInterval(() => {
+        void flushReplayEvents();
+      }, REPLAY_FLUSH_INTERVAL_MS);
+    };
+
+    socket.on("connect", async () => {
+      if (disposed) {
+        return;
+      }
+
+      try {
+        const response = await emitWithAck(socket, "replay:init", {
+          contestId: id,
+          contestProblemId,
+          clerkUserId: user.id,
+        });
+
+        const replay = response?.replay;
+        if (!replay?.timeline_id) {
+          throw new Error("Replay timeline_id missing in init response");
+        }
+
+        replayTimelineIdRef.current = replay.timeline_id;
+        replaySeqRef.current = Number(replay.last_event_seq || 0);
+        replaySessionReadyRef.current = true;
+        startFlushTimer();
+
+        // Persist an initial snapshot so replay can always bootstrap.
+        queueReplayCodeEvent(
+          replayCodeRef.current || "",
+          "init_snapshot",
+          replayLanguageRef.current
+        );
+      } catch (error) {
+        console.warn("Replay init failed:", error.message);
+      }
+    });
+
+    socket.on("disconnect", () => {
+      replaySessionReadyRef.current = false;
+    });
+
+    socket.connect();
+
+    return () => {
+      disposed = true;
+
+      if (replayFlushTimerRef.current) {
+        clearInterval(replayFlushTimerRef.current);
+        replayFlushTimerRef.current = null;
+      }
+
+      if (
+        socket.connected &&
+        replayTimelineIdRef.current &&
+        replayBufferRef.current.length > 0 &&
+        !replayFinalizedRef.current
+      ) {
+        const pending = [...replayBufferRef.current];
+        replayBufferRef.current = [];
+        socket.emit("replay:events", {
+          contestId: id,
+          timelineId: replayTimelineIdRef.current,
+          clerkUserId: user.id,
+          events: pending,
+        });
+      }
+
+      socket.disconnect();
+      replaySocketRef.current = null;
+      replaySessionReadyRef.current = false;
+    };
+  }, [
+    contestMeta,
+    contestProblemId,
+    flushReplayEvents,
+    id,
+    isSignedIn,
+    queueReplayCodeEvent,
+    user?.id,
+  ]);
+
+  useEffect(() => {
     if (!contestMeta?.start_time || !contestMeta?.end_time) {
       return undefined;
     }
@@ -218,6 +489,8 @@ class Main {
       setContestCountdownLabel("Ended");
       setContestCountdown("00:00:00");
 
+      void finalizeReplayTimeline("contest_ended");
+
       if (!hasContestEndPopupShownRef.current) {
         hasContestEndPopupShownRef.current = true;
         alert("Contest has ended.");
@@ -228,7 +501,7 @@ class Main {
     tick();
     const intervalId = setInterval(tick, 1000);
     return () => clearInterval(intervalId);
-  }, [contestMeta, id, navigate]);
+  }, [contestMeta, finalizeReplayTimeline, id, navigate]);
 
   const handleEditorWillMount = (monaco) => {
     monaco.editor.defineTheme("codezen-dark", {
@@ -262,12 +535,22 @@ class Main {
   };
 
   const handleLanguageChange = (newLang) => {
+    const nextCode = boilerplates[newLang];
     setLanguage(newLang);
-    setCode(boilerplates[newLang]);
+    setCode(nextCode);
+    queueReplayCodeEvent(nextCode, "language_change", newLang);
   };
 
   const handleReset = () => {
-    setCode(boilerplates[language]);
+    const nextCode = boilerplates[language];
+    setCode(nextCode);
+    queueReplayCodeEvent(nextCode, "reset");
+  };
+
+  const handleEditorChange = (value) => {
+    const nextCode = value || "";
+    setCode(nextCode);
+    queueReplayCodeEvent(nextCode, "editor_change");
   };
 
   const handleMouseDown = () => {
@@ -664,6 +947,10 @@ class Main {
           submission_id: submissionId,
           contest_problem_id: contestProblemId,
         });
+
+        if (submissionData.verdict === "accepted") {
+          await finalizeReplayTimeline("accepted_submission");
+        }
       } catch (persistErr) {
         console.warn("Failed to persist contest submission:", persistErr.response?.data || persistErr.message);
       }
@@ -1285,7 +1572,7 @@ class Main {
             height="100%"
             language={languageMap[language]}
             value={code}
-            onChange={(value) => setCode(value || "")}
+            onChange={handleEditorChange}
             theme="codezen-dark"
             beforeMount={handleEditorWillMount}
             options={{

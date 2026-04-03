@@ -17,13 +17,23 @@ const getContestStatus = (contest) => {
   return "Ended";
 };
 
+const INDIA_TIMEZONE = "Asia/Kolkata";
+
 const formatDateTime = (value) => {
-  return new Date(value).toLocaleString("en-US", {
+  if (!value) return "-";
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "-";
+
+  return parsed.toLocaleString("en-IN", {
+    timeZone: INDIA_TIMEZONE,
+    day: "2-digit",
     month: "short",
-    day: "numeric",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    hour12: true,
+    timeZoneName: "short",
   });
 };
 
@@ -294,7 +304,7 @@ const Contest = () => {
     });
   }, [contest?.start_time, leaderboardRows, problems, submissions]);
 
-  const openReplay = (row, problem, result) => {
+  const openReplay = async (row, problem, result) => {
     const acceptedSubmission = submissions
       .filter(
         (entry) =>
@@ -312,7 +322,42 @@ const Contest = () => {
       penalty: result.penalty,
       sourceCode: acceptedSubmission?.source_code || "",
       submittedAt: acceptedSubmission?.submitted_at || null,
+      events: [],
+      loading: true,
     });
+
+    try {
+      const replayResponse = await axiosInstance.get(`/api/contests/${id}/replay`, {
+        params: {
+          contest_problem_id: problem.id,
+          clerk_user_id: row.userId,
+        },
+      });
+
+      const replayEvents = Array.isArray(replayResponse.data?.events)
+        ? replayResponse.data.events
+        : [];
+
+      setActiveReplay((current) =>
+        current
+          ? {
+              ...current,
+              events: replayEvents,
+              loading: false,
+            }
+          : current
+      );
+    } catch (error) {
+      console.warn("Replay timeline lookup failed; using source-code fallback:", error.message);
+      setActiveReplay((current) =>
+        current
+          ? {
+              ...current,
+              loading: false,
+            }
+          : current
+      );
+    }
   };
 
   const handleRegister = async () => {

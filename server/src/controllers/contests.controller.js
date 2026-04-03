@@ -1,5 +1,6 @@
 import * as problemsService from '../services/problems.service.js';
 import * as contestService from '../services/contest.service.js';
+import * as contestReplayService from '../services/contestReplay.service.js';
 import { ENV } from '../config/env.config.js';
 import { callGroqLLM } from '../config/groq.client.js';
 
@@ -194,6 +195,125 @@ export async function getContestLeaderboard(req, res, next) {
 		return res.status(200).json(leaderboardResult);
 	} catch (error) {
 		console.error('Error in getContestLeaderboard:', error);
+		next(error);
+	}
+}
+
+export async function initContestReplay(req, res, next) {
+	try {
+		const clerkUserId = getAuthUserId(req);
+		if (!clerkUserId) {
+			return res.status(401).json({
+				success: false,
+				message: 'Unauthorized',
+			});
+		}
+
+		const { contestId } = req.params;
+		const { contest_problem_id: contestProblemId } = req.body || {};
+
+		const replay = await contestReplayService.initContestReplayTimeline(
+			contestId,
+			contestProblemId,
+			clerkUserId
+		);
+
+		return res.status(200).json(replay);
+	} catch (error) {
+		console.error('Error in initContestReplay:', error);
+		next(error);
+	}
+}
+
+export async function appendContestReplayEvents(req, res, next) {
+	try {
+		const clerkUserId = getAuthUserId(req);
+		if (!clerkUserId) {
+			return res.status(401).json({
+				success: false,
+				message: 'Unauthorized',
+			});
+		}
+
+		const { contestId, timelineId } = req.params;
+		const result = await contestReplayService.appendContestReplayEvents(
+			contestId,
+			timelineId,
+			clerkUserId,
+			req.body || {}
+		);
+
+		return res.status(202).json(result);
+	} catch (error) {
+		console.error('Error in appendContestReplayEvents:', error);
+		next(error);
+	}
+}
+
+export async function finalizeContestReplay(req, res, next) {
+	try {
+		const clerkUserId = getAuthUserId(req);
+		if (!clerkUserId) {
+			return res.status(401).json({
+				success: false,
+				message: 'Unauthorized',
+			});
+		}
+
+		const { contestId, timelineId } = req.params;
+		const replay = await contestReplayService.finalizeContestReplayTimeline(
+			contestId,
+			timelineId,
+			clerkUserId,
+			req.body || {}
+		);
+
+		return res.status(200).json(replay);
+	} catch (error) {
+		console.error('Error in finalizeContestReplay:', error);
+		next(error);
+	}
+}
+
+export async function getContestReplay(req, res, next) {
+	try {
+		const clerkUserId = getAuthUserId(req);
+		if (!clerkUserId) {
+			return res.status(401).json({
+				success: false,
+				message: 'Unauthorized',
+			});
+		}
+
+		const { contestId, timelineId } = req.params;
+		const replay = await contestReplayService.getContestReplayTimeline(
+			contestId,
+			timelineId,
+			clerkUserId
+		);
+
+		return res.status(200).json(replay);
+	} catch (error) {
+		console.error('Error in getContestReplay:', error);
+		next(error);
+	}
+}
+
+export async function getContestReplayByUserProblem(req, res, next) {
+	try {
+		const { contestId } = req.params;
+		const contestProblemId = String(req.query?.contest_problem_id || '').trim();
+		const replayOwnerClerkUserId = String(req.query?.clerk_user_id || '').trim();
+
+		const replay = await contestReplayService.getContestReplayByUserProblem(
+			contestId,
+			contestProblemId,
+			replayOwnerClerkUserId
+		);
+
+		return res.status(200).json(replay);
+	} catch (error) {
+		console.error('Error in getContestReplayByUserProblem:', error);
 		next(error);
 	}
 }

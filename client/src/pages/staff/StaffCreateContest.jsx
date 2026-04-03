@@ -5,6 +5,32 @@ import Header from '../../components/Header';
 import Footer from '../../components/Footer';
 import axiosInstance from '../../lib/axios';
 
+const toDateTimeLocalValue = (date = new Date()) => {
+  const pad = (num) => String(num).padStart(2, '0');
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+const validateDateTimes = (data) => {
+  const start = data.start_time;
+  const end = data.end_time;
+  const deadline = data.registration_deadline;
+
+  if (start && end && end <= start) {
+    return 'End time must be after start time';
+  }
+
+  if (deadline && start && deadline >= start) {
+    return 'Registration deadline must be before start time';
+  }
+
+  return null;
+};
+
 const StaffCreateContest = () => {
   const navigate = useNavigate();
   const profile = useSelector((state) => state.user?.profile);
@@ -17,6 +43,7 @@ const StaffCreateContest = () => {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [nowLocal] = useState(() => toDateTimeLocalValue(new Date()));
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -81,10 +108,23 @@ const StaffCreateContest = () => {
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : value,
-    }));
+    setFormData((prev) => {
+      const next = {
+        ...prev,
+        [name]: type === 'checkbox' ? checked : value,
+      };
+
+      if (name === 'start_time' && next.registration_deadline && next.registration_deadline >= value) {
+        next.registration_deadline = '';
+      }
+
+      if (name === 'start_time' && next.end_time && next.end_time <= value) {
+        next.end_time = '';
+      }
+
+      return next;
+    });
+    setError(null);
   };
 
   const updateProblemPreview = (field, value) => {
@@ -177,6 +217,12 @@ const StaffCreateContest = () => {
       return;
     }
 
+    const dateError = validateDateTimes(formData);
+    if (dateError) {
+      setError(dateError);
+      return;
+    }
+
     setStep(2);
   };
 
@@ -195,6 +241,12 @@ const StaffCreateContest = () => {
     const titleLength = formData.title.trim().length;
     if (titleLength < 5 || titleLength > 150) {
       setError('Contest title must be between 5 and 150 characters');
+      return;
+    }
+
+    const dateError = validateDateTimes(formData);
+    if (dateError) {
+      setError(dateError);
       return;
     }
 
@@ -320,9 +372,11 @@ const StaffCreateContest = () => {
                       name="start_time"
                       value={formData.start_time}
                       onChange={handleInputChange}
+                      min={nowLocal}
                       required
                       className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-slate-50 focus:border-cyan-400 focus:outline-none"
                     />
+                    <p className="mt-1 text-xs text-slate-400">Start time must be in the future.</p>
                   </div>
 
                   <div>
@@ -332,9 +386,11 @@ const StaffCreateContest = () => {
                       name="end_time"
                       value={formData.end_time}
                       onChange={handleInputChange}
+                      min={formData.start_time || nowLocal}
                       required
                       className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-slate-50 focus:border-cyan-400 focus:outline-none"
                     />
+                    <p className="mt-1 text-xs text-slate-400">End time must be after start time.</p>
                   </div>
 
                   <div>
@@ -344,8 +400,11 @@ const StaffCreateContest = () => {
                       name="registration_deadline"
                       value={formData.registration_deadline}
                       onChange={handleInputChange}
+                      min={nowLocal}
+                      max={formData.start_time || undefined}
                       className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-slate-50 focus:border-cyan-400 focus:outline-none"
                     />
+                    <p className="mt-1 text-xs text-slate-400">Deadline must be before contest start time.</p>
                   </div>
 
                   <div>

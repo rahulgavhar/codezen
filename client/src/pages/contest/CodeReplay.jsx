@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Editor from "@monaco-editor/react";
 
-const getReplayFrames = (sourceCode) => {
+const getSourceCodeFrames = (sourceCode) => {
   const normalized =
     sourceCode && sourceCode.trim().length > 0
       ? sourceCode
@@ -17,6 +17,74 @@ const getReplayFrames = (sourceCode) => {
     frames.push(normalized.slice(0, i));
   }
   frames.push(normalized);
+
+  return frames;
+};
+
+const applyEventToCode = (currentCode, event) => {
+  const op = String(event?.op || "").toLowerCase();
+
+  if (op === "set_code") {
+    return typeof event?.code === "string" ? event.code : currentCode;
+  }
+
+  if (op === "insert") {
+    const pos = Number(event?.pos);
+    const text = String(event?.text ?? event?.char ?? "");
+    if (!Number.isInteger(pos) || pos < 0) {
+      return currentCode;
+    }
+    const safePos = Math.min(pos, currentCode.length);
+    return `${currentCode.slice(0, safePos)}${text}${currentCode.slice(safePos)}`;
+  }
+
+  if (op === "delete") {
+    const pos = Number(event?.pos);
+    const lengthRaw = Number(event?.length ?? 1);
+    if (!Number.isInteger(pos) || pos < 0) {
+      return currentCode;
+    }
+    const length = Number.isInteger(lengthRaw) && lengthRaw > 0 ? lengthRaw : 1;
+    const safePos = Math.min(pos, currentCode.length);
+    return `${currentCode.slice(0, safePos)}${currentCode.slice(safePos + length)}`;
+  }
+
+  return currentCode;
+};
+
+const getReplayFrames = (replay) => {
+  const eventCandidates = Array.isArray(replay?.events)
+    ? replay.events
+    : Array.isArray(replay?.replayEvents)
+      ? replay.replayEvents
+      : [];
+
+  if (eventCandidates.length === 0) {
+    return getSourceCodeFrames(replay?.sourceCode || "");
+  }
+
+  const seen = new Set();
+  const ordered = [...eventCandidates]
+    .filter((event) => {
+      const seq = Number(event?.seq);
+      if (!Number.isInteger(seq) || seq < 1) return false;
+      if (seen.has(seq)) return false;
+      seen.add(seq);
+      return true;
+    })
+    .sort((a, b) => Number(a.seq) - Number(b.seq));
+
+  if (ordered.length === 0) {
+    return getSourceCodeFrames(replay?.sourceCode || "");
+  }
+
+  let currentCode = "";
+  const frames = [currentCode];
+
+  for (const event of ordered) {
+    currentCode = applyEventToCode(currentCode, event);
+    frames.push(currentCode);
+  }
 
   return frames;
 };
@@ -38,13 +106,13 @@ const CodeReplay = ({ replay }) => {
   const [speed, setSpeed] = useState(1);
   const [frameIndex, setFrameIndex] = useState(0);
 
-  const frames = useMemo(() => getReplayFrames(replay?.sourceCode || ""), [replay?.sourceCode]);
+  const frames = useMemo(() => getReplayFrames(replay), [replay]);
   const maxFrame = Math.max(0, frames.length - 1);
 
   useEffect(() => {
     setFrameIndex(0);
     setIsPlaying(false);
-  }, [replay?.sourceCode]);
+  }, [replay]);
 
   useEffect(() => {
     if (!isPlaying || maxFrame === 0) {
@@ -106,6 +174,9 @@ const CodeReplay = ({ replay }) => {
           <p className="text-[11px] text-slate-400">
             #{replay?.rank || "-"} {replay?.handle || "Unknown"} • +{replay?.penalty ?? 0} • {formatTime(replay?.submittedAt)}
           </p>
+          {replay?.loading && (
+            <p className="text-[10px] text-amber-300">Loading timeline events...</p>
+          )}
         </div>
 
         <button

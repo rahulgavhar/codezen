@@ -1,5 +1,6 @@
 import * as contestsRepo from '../repositories/contests.repo.js';
 import * as submissionsRepo from '../repositories/submissions.repo.js';
+import * as contestReplayService from './contestReplay.service.js';
 
 function buildHttpError(message, statusCode) {
 	const error = new Error(message);
@@ -7,8 +8,30 @@ function buildHttpError(message, statusCode) {
 	return error;
 }
 
+const IST_OFFSET = '+05:30';
+
+function hasTimezoneSuffix(value) {
+	return /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
+}
+
+function hasLocalDateTimeShape(value) {
+	return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(value);
+}
+
 function parseDateOrThrow(value, fieldName) {
-	const parsed = new Date(value);
+	if (!value) {
+		throw buildHttpError(`${fieldName} is invalid`, 400);
+	}
+
+	const raw = typeof value === 'string' ? value.trim() : String(value);
+	let normalized = raw;
+
+	// Datetime-local values (without timezone) are interpreted as IST.
+	if (!hasTimezoneSuffix(raw) && hasLocalDateTimeShape(raw)) {
+		normalized = `${raw.length === 16 ? `${raw}:00` : raw}${IST_OFFSET}`;
+	}
+
+	const parsed = new Date(normalized);
 	if (Number.isNaN(parsed.getTime())) {
 		throw buildHttpError(`${fieldName} is invalid`, 400);
 	}
@@ -299,7 +322,21 @@ export async function createContestSubmission(contestId, clerkUserId, payload = 
 		throw buildHttpError('Submission is not finalized yet', 409);
 	}
 
-	return upsertContestSubmissionFromBase(contestId, contestProblemId, clerkUserId, submission);
+	const recorded = await upsertContestSubmissionFromBase(contestId, contestProblemId, clerkUserId, submission);
+
+	if (recorded?.verdict === 'accepted') {
+		try {
+			await contestReplayService.finalizeReplayForAcceptedSubmission(
+				contestId,
+				contestProblemId,
+				clerkUserId
+			);
+		} catch (error) {
+			console.warn('Replay finalization after accepted submission failed:', error.message);
+		}
+	}
+
+	return recorded;
 }
 
 export async function getContestRegistrants(contestId, queryParams = {}) {

@@ -27,6 +27,8 @@ import interviewProblemsRoutes from "./routes/interview_problems.route.js";
 import { startVMSyncJob } from "./jobs/vmSync.job.js";
 import { trackActivityAndStartVM } from "./middleware/auth.middleware.js";
 import { setupInterviewSignaling } from "./lib/webrtc.signaling.js";
+import { setupContestReplaySignaling } from "./lib/contestReplay.signaling.js";
+import { startContestReplayWorker, stopContestReplayWorker } from "./services/contestReplay.service.js";
 
 // Middleware
 
@@ -116,10 +118,36 @@ const startServer = async () => {
     
     // Initialize WebRTC signaling
     setupInterviewSignaling(io);
+
+    // Initialize contest replay signaling.
+    setupContestReplaySignaling(io);
+
+    // Start replay flush worker for contest timeline event chunks.
+    startContestReplayWorker();
     
     server.listen(ENV.PORT, () => console.log(`Server is running on port ${ENV.PORT}`));
   } catch (error) {
     console.error("Failed to start server:", error);
   }
 };
+
+const gracefulShutdown = async (signal) => {
+  try {
+    console.log(`Received ${signal}. Flushing replay buffers before shutdown...`);
+    await stopContestReplayWorker();
+  } catch (error) {
+    console.error('Error while stopping replay worker:', error);
+  } finally {
+    process.exit(0);
+  }
+};
+
+process.on('SIGINT', () => {
+  gracefulShutdown('SIGINT');
+});
+
+process.on('SIGTERM', () => {
+  gracefulShutdown('SIGTERM');
+});
+
 startServer();
