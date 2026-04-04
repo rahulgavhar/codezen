@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { useSelector } from "react-redux";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
 import axiosInstance from "../lib/axios";
@@ -11,6 +13,7 @@ const JobRecommendations = () => {
   const [recommendationsCount, setRecommendationsCount] = useState(0);
   const [skills, setSkills] = useState([]);
   const [skillsCount, setSkillsCount] = useState(0);
+  const currentUsername = useSelector((state) => state.user?.profile?.username);
 
   const loadRecommendations = async (limit = 20) => {
     try {
@@ -54,6 +57,8 @@ const JobRecommendations = () => {
       return acc;
     }, {});
   }, [recommendations]);
+
+  const isMissingResumeMessage = error === "Upload Resume in Your Profile";
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col">
@@ -124,7 +129,15 @@ const JobRecommendations = () => {
             </div>
           ) : error ? (
             <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 p-8 text-center text-rose-200">
-              {error}
+              <p>{error}</p>
+              {isMissingResumeMessage && (
+                <Link
+                  to={currentUsername ? `/profile/${currentUsername}` : "/"}
+                  className="mt-4 inline-flex px-4 py-2 rounded-lg bg-cyan-500 text-slate-950 font-semibold hover:bg-cyan-400 transition"
+                >
+                  Go to Profile
+                </Link>
+              )}
             </div>
           ) : recommendations.length === 0 ? (
             <div className="rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center text-slate-400">

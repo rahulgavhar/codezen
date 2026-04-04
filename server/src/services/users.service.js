@@ -115,14 +115,25 @@ const buildRecommendationsResponse = (payload, topN) => {
   };
 };
 
-const callJobApiWithFile = async (endpoint, file) => {
+const callJobApiWithFile = async (endpoint, file, queryParams = {}) => {
+  const params = new URLSearchParams();
+  Object.entries(queryParams).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") {
+      return;
+    }
+    params.set(key, String(value));
+  });
+
+  const baseUrl = getJobApiUrl(endpoint);
+  const requestUrl = params.size > 0 ? `${baseUrl}?${params.toString()}` : baseUrl;
+
   const formData = new FormData();
   const fileBlob = new Blob([file.buffer], {
     type: file.mimetype || "application/octet-stream",
   });
   formData.append("file", fileBlob, file.originalname || "resume");
 
-  const response = await fetch(getJobApiUrl(endpoint), {
+  const response = await fetch(requestUrl, {
     method: "POST",
     body: formData,
   });
@@ -148,41 +159,63 @@ const callJobApiWithFile = async (endpoint, file) => {
   return parsedBody || {};
 };
 
-const callJobApiGet = async (endpoint, queryParams = {}) => {
-  const params = new URLSearchParams();
-  Object.entries(queryParams).forEach(([key, value]) => {
-    if (value === undefined || value === null || value === "") {
-      return;
-    }
-    params.set(key, String(value));
-  });
+const getLatestResumeFileForUser = async (clerkUserId) => {
+  ensureSupabaseConfigured();
 
-  const baseUrl = getJobApiUrl(endpoint);
-  const requestUrl = params.size > 0 ? `${baseUrl}?${params.toString()}` : baseUrl;
+  const { data: objects, error: listError } = await supabase.storage
+    .from(RESUMES_STORAGE_BUCKET)
+    .list(clerkUserId, {
+      limit: 100,
+      offset: 0,
+    });
 
-  const response = await fetch(requestUrl, {
-    method: "GET",
-  });
-
-  const responseText = await response.text();
-  let parsedBody = null;
-
-  if (responseText) {
-    try {
-      parsedBody = JSON.parse(responseText);
-    } catch {
-      parsedBody = { message: responseText };
-    }
+  if (listError) {
+    throw buildHttpError(`Failed to read uploaded resumes: ${listError.message}`, 500);
   }
 
-  if (!response.ok) {
+  const files = Array.isArray(objects)
+    ? objects.filter((item) => item?.name && !item?.name.endsWith("/"))
+    : [];
+
+  if (files.length === 0) {
+    throw buildHttpError("Upload Resume in Your Profile", 404);
+  }
+
+  const latestFile = [...files].sort((a, b) => {
+    const aDate = new Date(a?.created_at || a?.updated_at || 0).getTime();
+    const bDate = new Date(b?.created_at || b?.updated_at || 0).getTime();
+    if (aDate !== bDate) {
+      return bDate - aDate;
+    }
+    return String(b?.name || "").localeCompare(String(a?.name || ""));
+  })[0];
+
+  const objectPath = `${clerkUserId}/${latestFile.name}`;
+  const { data: blobData, error: downloadError } = await supabase.storage
+    .from(RESUMES_STORAGE_BUCKET)
+    .download(objectPath);
+
+  if (downloadError || !blobData) {
     throw buildHttpError(
-      `Job recommendation API request failed for ${endpoint} with status ${response.status}`,
-      502
+      `Failed to load uploaded resume: ${downloadError?.message || "Unknown download error"}`,
+      500
     );
   }
 
-  return parsedBody || {};
+  const arrayBuffer = await blobData.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  const originalNameParts = String(latestFile.name).split("-");
+  const inferredName =
+    originalNameParts.length > 1
+      ? originalNameParts.slice(1).join("-")
+      : latestFile.name;
+
+  return {
+    buffer,
+    size: buffer.length,
+    mimetype: latestFile?.metadata?.mimetype || blobData.type || "application/octet-stream",
+    originalname: inferredName,
+  };
 };
 
 /**
@@ -407,9 +440,11 @@ export const uploadResumeAndExtractSkillsService = async (
     }
 
     try {
-      const recommendationsPayload = await callJobApiGet("/get-recommendations", {
-        top_n: topN,
-      });
+      const recommendationsPayload = await callJobApiWithFile(
+        "/get-recommendations",
+        file,
+        { top_n: topN }
+      );
       getRecommendationsResponse = buildRecommendationsResponse(
         recommendationsPayload,
         topN
@@ -524,9 +559,12 @@ export const getPersonalizedJobRecommendationsService = async (
     }
 
     const topN = parseTopN(queryParams?.top_n);
-    const payload = await callJobApiGet("/get-recommendations", {
-      top_n: topN,
-    });
+    const latestResumeFile = await getLatestResumeFileForUser(clerkUserId);
+    const payload = await callJobApiWithFile(
+      "/get-recommendations",
+      latestResumeFile,
+      { top_n: topN }
+    );
 
     return buildRecommendationsResponse(payload, topN);
   } catch (error) {
