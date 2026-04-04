@@ -13,7 +13,8 @@ import * as problemsService from '../services/problems.service.js';
  */
 export async function getProblems(req, res, next) {
   try {
-    const result = await problemsService.getUserProblems(req.query);
+    const clerkUserId = req.auth?.()?.userId || null;
+    const result = await problemsService.getUserProblems(req.query, clerkUserId);
     
     res.json({
       success: true,
@@ -32,6 +33,7 @@ export async function getProblems(req, res, next) {
  */
 export async function getProblemDetail(req, res, next) {
   try {
+    const clerkUserId = req.auth?.()?.userId || null;
     const { id } = req.params;
 
     if (!id) {
@@ -41,7 +43,7 @@ export async function getProblemDetail(req, res, next) {
       });
     }
 
-    const problem = await problemsService.getSingleProblem(id);
+    const problem = await problemsService.getSingleProblem(id, clerkUserId);
 
     if (!problem) {
       return res.status(404).json({
@@ -66,6 +68,7 @@ export async function getProblemDetail(req, res, next) {
  */
 export async function getProblemSamples(req, res, next) {
   try {
+    const clerkUserId = req.auth?.()?.userId || null;
     const { id } = req.params;
 
     if (!id) {
@@ -76,7 +79,7 @@ export async function getProblemSamples(req, res, next) {
     }
 
     // Verify problem exists and is published
-    const problem = await problemsService.getSingleProblem(id);
+    const problem = await problemsService.getSingleProblem(id, clerkUserId);
     if (!problem) {
       return res.status(404).json({
         success: false,

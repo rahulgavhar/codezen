@@ -290,6 +290,17 @@ export async function createSubmission(clerkUserId, submissionData) {
   // Insert submission into DB
   const dbSubmission = await submissionsRepo.createSubmission(payload);
 
+  if (submissionData.problem_id) {
+    try {
+      await submissionsRepo.recordUserProblemAttempt(clerkUserId, submissionData.problem_id);
+    } catch (progressError) {
+      console.warn(
+        `[createSubmission] Failed to record user problem attempt for ${clerkUserId}/${submissionData.problem_id}:`,
+        progressError.message
+      );
+    }
+  }
+
   try {
     // Check if this is a problem-based submission or IDE run
     if (!submissionData.problem_id) {
@@ -768,6 +779,19 @@ export async function updateTestCaseResultFromJudge0(judge0Token, judge0Data) {
     }
 
     const finalSubmission = await submissionsRepo.updateSubmissionVerdict(submission.id, updateData);
+    if (finalVerdict === 'accepted' && latestSubmission?.clerk_user_id && latestSubmission?.problem_id) {
+      try {
+        await submissionsRepo.markUserProblemSolved(
+          latestSubmission.clerk_user_id,
+          latestSubmission.problem_id
+        );
+      } catch (progressError) {
+        console.warn(
+          `[updateTestCaseResultFromJudge0] Failed to mark solved for ${latestSubmission.clerk_user_id}/${latestSubmission.problem_id}:`,
+          progressError.message
+        );
+      }
+    }
     console.log(`[updateTestCaseResultFromJudge0] ✓ Final submission saved: verdict=${finalSubmission.verdict}`);
     return finalSubmission;
   });
@@ -854,7 +878,20 @@ export async function updateSubmissionFromJudge0(judge0Token, judge0Data) {
   };
 
   // Update submission in DB
-  return await submissionsRepo.updateSubmissionVerdict(submission.id, updateData);
+  const updatedSubmission = await submissionsRepo.updateSubmissionVerdict(submission.id, updateData);
+
+  if (verdict === 'accepted' && submission?.clerk_user_id && submission?.problem_id) {
+    try {
+      await submissionsRepo.markUserProblemSolved(submission.clerk_user_id, submission.problem_id);
+    } catch (progressError) {
+      console.warn(
+        `[updateSubmissionFromJudge0] Failed to mark solved for ${submission.clerk_user_id}/${submission.problem_id}:`,
+        progressError.message
+      );
+    }
+  }
+
+  return updatedSubmission;
 }
 
 /**
@@ -1023,8 +1060,24 @@ export async function pollStuckTestCasesFromJudge0(submissionId, testResults, te
       if (hasSubmissionError) {
         updateData.error_message = 'Some test cases failed to execute on the server';
       }
-      
-      return await submissionsRepo.updateSubmissionVerdict(submissionId, updateData);
+
+      const finalSubmission = await submissionsRepo.updateSubmissionVerdict(submissionId, updateData);
+
+      if (finalVerdict === 'accepted' && submission?.clerk_user_id && submission?.problem_id) {
+        try {
+          await submissionsRepo.markUserProblemSolved(
+            submission.clerk_user_id,
+            submission.problem_id
+          );
+        } catch (progressError) {
+          console.warn(
+            `[pollStuckTestCasesFromJudge0] Failed to mark solved for ${submission.clerk_user_id}/${submission.problem_id}:`,
+            progressError.message
+          );
+        }
+      }
+
+      return finalSubmission;
     } else {
       // Partial update: some tests completed, some still pending
       const nonPendingCount = Object.values(updatedTestResults).filter(r => r.verdict && r.verdict !== 'pending').length;

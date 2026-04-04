@@ -17,6 +17,8 @@ export async function getPublishedProblems(options = {}) {
     topics = [],
     difficulties = [],
     search = '',
+    clerkUserId = null,
+    progressStatus = '',
   } = options;
 
   const offset = (page - 1) * limit;
@@ -88,20 +90,67 @@ export async function getPublishedProblems(options = {}) {
   }
 
   // Format response data
-  const formattedProblems = problems.map(problem => ({
+  const problemIds = problems.map((problem) => problem.id);
+  let userProgressByProblemId = new Map();
+
+  if (clerkUserId && problemIds.length > 0) {
+    const { data: progressRows, error: progressError } = await supabase
+      .from('user_problems')
+      .select('problem_id, status, attempts')
+      .eq('clerk_user_id', clerkUserId)
+      .in('problem_id', problemIds);
+
+    if (progressError) {
+      console.error('Error fetching user problem progress:', progressError);
+    } else {
+      userProgressByProblemId = new Map(
+        (progressRows || []).map((row) => [row.problem_id, row])
+      );
+    }
+  }
+
+  const normalizedProgressStatus = String(progressStatus || '').toLowerCase();
+
+  let formattedProblems = problems.map(problem => {
+    const progress = userProgressByProblemId.get(problem.id);
+    const statusValue = progress?.status || 'unsolved';
+
+    const parsedAcceptance = Number.parseFloat(problem.acceptance);
+    const acceptanceFromColumns = Number.isFinite(parsedAcceptance)
+      ? parsedAcceptance
+      : null;
+    const attemptsValue = Number(problem.total_attempts || 0);
+    const acceptedValue = Number(problem.total_accepted || 0);
+    const acceptanceDerived =
+      attemptsValue > 0 ? (acceptedValue / attemptsValue) * 100 : 0;
+
+    const normalizedAcceptance = Number(
+      (acceptanceFromColumns ?? acceptanceDerived).toFixed(1)
+    );
+
+    return {
     id: problem.id,
     title: problem.title,
     slug: problem.slug,
     difficulty: problem.difficulty,
     description: problem.description,
-    acceptance: problem.acceptance,
+    acceptance: normalizedAcceptance,
     total_attempts: problem.total_attempts,
     total_accepted: problem.total_accepted,
+    user_status: statusValue,
+    user_attempts: Number(progress?.attempts || 0),
     tags: problem.problem_tags
       .map(pt => pt.tags.name)
       .filter(Boolean),
     created_at: problem.created_at,
-  }));
+    };
+  });
+
+  if (normalizedProgressStatus === 'attempted' || normalizedProgressStatus === 'solved') {
+    formattedProblems = formattedProblems.filter(
+      (problem) => problem.user_status === normalizedProgressStatus
+    );
+  }
 
   // Get total count for pagination (accounting for filters)
   const filteredTotal = formattedProblems.length;
@@ -121,6 +170,16 @@ export async function getPublishedProblems(options = {}) {
  * @returns {Promise<Object>} Problem details
  */
 export async function getProblemById(problemId) {
+  return await getProblemByIdForUser(problemId, null);
+}
+
+/**
+ * Get a single problem by ID with user progress details
+ * @param {string} problemId - UUID of the problem
+ * @param {string|null} clerkUserId - Clerk user id for personalized status
+ * @returns {Promise<Object>} Problem details
+ */
+export async function getProblemByIdForUser(problemId, clerkUserId = null) {
   const { data: problem, error } = await supabase
     .from('problems')
     .select(`
@@ -158,6 +217,33 @@ export async function getProblemById(problemId) {
     throw error;
   }
 
+  let userStatus = 'unsolved';
+  let userAttempts = 0;
+
+  if (clerkUserId) {
+    const { data: progress, error: progressError } = await supabase
+      .from('user_problems')
+      .select('status, attempts')
+      .eq('clerk_user_id', clerkUserId)
+      .eq('problem_id', problemId)
+      .maybeSingle();
+
+    if (progressError) {
+      console.error('Error fetching user problem status for detail:', progressError);
+    } else if (progress) {
+      userStatus = progress.status || 'unsolved';
+      userAttempts = Number(progress.attempts || 0);
+    }
+  }
+
+  const parsedAcceptance = Number.parseFloat(problem.acceptance);
+  const acceptanceFromColumns = Number.isFinite(parsedAcceptance)
+    ? parsedAcceptance
+    : null;
+  const attemptsValue = Number(problem.total_attempts || 0);
+  const acceptedValue = Number(problem.total_accepted || 0);
+  const acceptanceDerived = attemptsValue > 0 ? (acceptedValue / attemptsValue) * 100 : 0;
+
   return {
     id: problem.id,
     title: problem.title,
@@ -170,9 +256,11 @@ export async function getProblemById(problemId) {
     hints: problem.hints || [],
     time_limit_ms: problem.time_limit_ms,
     memory_limit_mb: problem.memory_limit_mb,
-    acceptance: problem.acceptance,
+    acceptance: Number((acceptanceFromColumns ?? acceptanceDerived).toFixed(1)),
     total_attempts: problem.total_attempts,
     total_accepted: problem.total_accepted,
+    user_status: userStatus,
+    user_attempts: userAttempts,
     tags: problem.problem_tags
       .map(pt => pt.tags.name)
       .filter(Boolean),

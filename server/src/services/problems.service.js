@@ -10,8 +10,15 @@ import * as problemsRepo from '../repositories/problems.repo.js';
  * @param {string} queryParams.search - Search query for title or problem ID
  * @returns {Promise<Object>} Formatted problems response
  */
-export async function getUserProblems(queryParams = {}) {
-  let { page = 1, limit = 10, topics = '', difficulties = '', search = '' } = queryParams;
+export async function getUserProblems(queryParams = {}, clerkUserId = null) {
+  let {
+    page = 1,
+    limit = 10,
+    topics = '',
+    difficulties = '',
+    search = '',
+    progress_status = '',
+  } = queryParams;
 
   // Validate and normalize pagination params
   page = Math.max(1, parseInt(page) || 1);
@@ -33,6 +40,8 @@ export async function getUserProblems(queryParams = {}) {
     topics: topicsArray,
     difficulties: difficultiesArray,
     search: search.trim(),
+    clerkUserId,
+    progressStatus: String(progress_status || '').trim().toLowerCase(),
   });
 
   return {
@@ -52,8 +61,8 @@ export async function getUserProblems(queryParams = {}) {
  * @param {string} problemId - UUID of the problem
  * @returns {Promise<Object>} Problem details
  */
-export async function getSingleProblem(problemId) {
-  const problem = await problemsRepo.getProblemById(problemId);
+export async function getSingleProblem(problemId, clerkUserId = null) {
+  const problem = await problemsRepo.getProblemByIdForUser(problemId, clerkUserId);
   
   if (!problem) {
     return null;

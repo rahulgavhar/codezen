@@ -138,7 +138,7 @@ export async function updateSubmissionVerdict(submissionId, updateData) {
 export async function getSubmissionByJudge0Token(judge0Token) {
   const { data, error } = await supabase
     .from('submissions')
-    .select('id, judge0_token, verdict, stdout, stderr, compile_output, language, source_code, runtime_ms, memory_kb, error_message')
+    .select('id, clerk_user_id, problem_id, judge0_token, verdict, stdout, stderr, compile_output, language, source_code, runtime_ms, memory_kb, error_message')
     .eq('judge0_token', judge0Token)
     .single();
 
@@ -302,7 +302,7 @@ export async function getTestCaseSets(problemId) {
 export async function getSubmissionForTestCaseTracking(submissionId) {
   const { data, error } = await supabase
     .from('submissions')
-    .select('id, problem_id, language, source_code, verdict, test_results, test_cases_total, test_cases_passed')
+    .select('id, clerk_user_id, problem_id, language, source_code, verdict, test_results, test_cases_total, test_cases_passed')
     .eq('id', submissionId)
     .single();
 
@@ -311,6 +311,133 @@ export async function getSubmissionForTestCaseTracking(submissionId) {
       return null;
     }
     console.error('Error fetching submission for test case tracking:', error);
+    throw error;
+  }
+
+  return data;
+}
+
+/**
+ * Record a user attempt for a problem in user_problems
+ * @param {string} clerkUserId - Clerk user ID
+ * @param {string} problemId - Problem ID
+ * @returns {Promise<Object|null>} Updated progress row
+ */
+export async function recordUserProblemAttempt(clerkUserId, problemId) {
+  const nowIso = new Date().toISOString();
+
+  const { data: existing, error: fetchError } = await supabase
+    .from('user_problems')
+    .select('clerk_user_id, problem_id, status, attempts')
+    .eq('clerk_user_id', clerkUserId)
+    .eq('problem_id', problemId)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error('Error fetching user problem progress:', fetchError);
+    throw fetchError;
+  }
+
+  if (!existing) {
+    const { data, error } = await supabase
+      .from('user_problems')
+      .insert({
+        clerk_user_id: clerkUserId,
+        problem_id: problemId,
+        status: 'attempted',
+        attempts: 1,
+        last_submission_at: nowIso,
+      })
+      .select('clerk_user_id, problem_id, status, attempts, last_submission_at')
+      .single();
+
+    if (error) {
+      console.error('Error inserting user problem attempt:', error);
+      throw error;
+    }
+
+    return data;
+  }
+
+  const nextAttempts = Math.max(Number(existing.attempts || 0) + 1, 1);
+  const nextStatus = existing.status === 'solved' ? 'solved' : 'attempted';
+
+  const { data, error } = await supabase
+    .from('user_problems')
+    .update({
+      status: nextStatus,
+      attempts: nextAttempts,
+      last_submission_at: nowIso,
+    })
+    .eq('clerk_user_id', clerkUserId)
+    .eq('problem_id', problemId)
+    .select('clerk_user_id, problem_id, status, attempts, last_submission_at')
+    .single();
+
+  if (error) {
+    console.error('Error updating user problem attempt:', error);
+    throw error;
+  }
+
+  return data;
+}
+
+/**
+ * Mark user problem as solved in user_problems
+ * @param {string} clerkUserId - Clerk user ID
+ * @param {string} problemId - Problem ID
+ * @returns {Promise<Object|null>} Updated progress row
+ */
+export async function markUserProblemSolved(clerkUserId, problemId) {
+  const nowIso = new Date().toISOString();
+
+  const { data: existing, error: fetchError } = await supabase
+    .from('user_problems')
+    .select('clerk_user_id, problem_id, status, attempts')
+    .eq('clerk_user_id', clerkUserId)
+    .eq('problem_id', problemId)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error('Error fetching user problem progress for solve:', fetchError);
+    throw fetchError;
+  }
+
+  if (!existing) {
+    const { data, error } = await supabase
+      .from('user_problems')
+      .insert({
+        clerk_user_id: clerkUserId,
+        problem_id: problemId,
+        status: 'solved',
+        attempts: 1,
+        last_submission_at: nowIso,
+      })
+      .select('clerk_user_id, problem_id, status, attempts, last_submission_at')
+      .single();
+
+    if (error) {
+      console.error('Error inserting solved user problem:', error);
+      throw error;
+    }
+
+    return data;
+  }
+
+  const { data, error } = await supabase
+    .from('user_problems')
+    .update({
+      status: 'solved',
+      attempts: Math.max(Number(existing.attempts || 0), 1),
+      last_submission_at: nowIso,
+    })
+    .eq('clerk_user_id', clerkUserId)
+    .eq('problem_id', problemId)
+    .select('clerk_user_id, problem_id, status, attempts, last_submission_at')
+    .single();
+
+  if (error) {
+    console.error('Error updating solved user problem:', error);
     throw error;
   }
 

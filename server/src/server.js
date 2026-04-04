@@ -16,6 +16,8 @@ const __dirname = path.resolve();
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import {clerkMiddleware} from "@clerk/express";
+import { ApolloServer } from "@apollo/server";
+import { expressMiddleware } from "@as-integrations/express5";
 import judgeRoutes from "./routes/judge0.route.js";
 import usersRoutes from "./routes/users.route.js";
 import submissionsRoutes from "./routes/submissions.route.js";
@@ -30,6 +32,7 @@ import { setupInterviewSignaling } from "./lib/webrtc.signaling.js";
 import { setupContestReplaySignaling } from "./lib/contestReplay.signaling.js";
 import { startContestReplayWorker, stopContestReplayWorker } from "./services/contestReplay.service.js";
 import { closeRedisClient } from "./config/redis.client.js";
+import { typeDefs, resolvers } from "./graphql/schema.js";
 
 // Middleware
 
@@ -120,8 +123,31 @@ if(ENV.NODE_ENV === "production") {
   );
 }
 
+let apolloServer = null;
+
+const initializeGraphQL = async () => {
+  apolloServer = new ApolloServer({
+    typeDefs,
+    resolvers,
+  });
+
+  await apolloServer.start();
+
+  app.use(
+    "/graphql",
+    trackActivityAndStartVM,
+    expressMiddleware(apolloServer, {
+      context: async ({ req }) => ({
+        clerkUserId: req.auth?.()?.userId || null,
+      }),
+    })
+  );
+};
+
 const startServer = async () => {
   try {
+    await initializeGraphQL();
+
     // Start VM sync cron job 
     if(ENV.NODE_ENV === "production") startVMSyncJob();
     

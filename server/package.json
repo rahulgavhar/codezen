@@ -13,6 +13,8 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@apollo/server": "^5.5.0",
+    "@as-integrations/express5": "^1.1.2",
     "@azure/arm-compute": "^23.2.0",
     "@azure/identity": "^4.13.0",
     "@clerk/express": "^1.7.41",
@@ -22,6 +24,7 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "graphql": "^16.13.2",
     "groq-sdk": "^1.1.2",
     "ioredis": "^5.10.1",
     "multer": "^2.1.1",

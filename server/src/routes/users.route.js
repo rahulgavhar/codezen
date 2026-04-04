@@ -8,6 +8,8 @@ import {
   getCurrentUserActivity,
   getCurrentUserRatingHistory,
   getPublicUserProfile,
+  getPublicUserActivity,
+  getPublicUserRatingHistory,
   getUserProfileByClerkId,
   uploadResumeAndExtractSkills,
   getPersonalizedJobRecommendations,
@@ -59,6 +61,8 @@ router.post("/resume", handleResumeUpload, uploadResumeAndExtractSkills);
 router.get("/recommendations", getPersonalizedJobRecommendations);
 
 // Public routes (no authentication required)
+router.get("/public/:username/activity", getPublicUserActivity);
+router.get("/public/:username/rating-history", getPublicUserRatingHistory);
 router.get("/public/:username", getPublicUserProfile);
 router.get("/profile/:clerkUserId", getUserProfileByClerkId);
 

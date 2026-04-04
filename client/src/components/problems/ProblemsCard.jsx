@@ -15,7 +15,24 @@ const statusTone = {
 
 export default function ProblemsCard({ problem }) {
   if (!problem) return null;
-  const { title, difficulty, topic, acceptance, attempts, status } = problem;
+  const {
+    title,
+    difficulty,
+    tags = [],
+    acceptance,
+    user_status,
+  } = problem;
+
+  const normalizedUserStatus =
+    user_status === "solved"
+      ? "Solved"
+      : user_status === "attempted"
+      ? "Attempted"
+      : "Unsolved";
+
+  const acceptanceValue = Number.isFinite(Number(acceptance))
+    ? Number(acceptance).toFixed(1)
+    : "0.0";
 
   return (
     <article
@@ -29,12 +46,11 @@ export default function ProblemsCard({ problem }) {
           {difficulty}
         </span>
       </div>
-      <p className="mt-2 text-sm text-slate-300">{topic}</p>
+      <p className="mt-2 text-sm text-slate-300">{Array.isArray(tags) ? tags.join(", ") : ""}</p>
       <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-300">
-        <span className="rounded-lg bg-white/5 px-2.5 py-1">Acceptance: {acceptance}%</span>
-        <span className="rounded-lg bg-white/5 px-2.5 py-1">Attempts: {attempts}</span>
-        <span className={`rounded-lg bg-white/5 px-2.5 py-1 font-semibold ${statusTone[status]}`}>
-          {status}
+        <span className="rounded-lg bg-white/5 px-2.5 py-1">Acceptance: {acceptanceValue}%</span>
+        <span className={`rounded-lg bg-white/5 px-2.5 py-1 font-semibold ${statusTone[normalizedUserStatus]}`}>
+          {normalizedUserStatus}
         </span>
       </div>
       <Link 

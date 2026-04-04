@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
-import axios from "axios";
 import ProblemsCard from "../components/problems/ProblemsCard";
 import { useUser } from "@clerk/clerk-react";
 import GuestHeader from "../components/GuestHeader";
@@ -11,27 +10,17 @@ import tags from "../utils/tags.json";
 
 // Topics are now dynamically loaded from tags.json in the component
 
-const badgeTone = {
-  Easy: "bg-emerald-400/15 text-emerald-200 border-emerald-400/30",
-  Medium: "bg-amber-400/15 text-amber-200 border-amber-400/30",
-  Hard: "bg-rose-400/15 text-rose-200 border-rose-400/30",
-};
-
-const statusTone = {
-  Solved: "text-emerald-300",
-  Attempted: "text-amber-200",
-  Unsolved: "text-slate-400",
-};
-
 const ProblemsPage = () => {
   const navigate = useNavigate();
-  const { user, isSignedIn } = useUser();
+  const { isSignedIn } = useUser();
   const [allProblems, setAllProblems] = useState([]);
   const [selectedTopics, setSelectedTopics] = useState([]);
   const [selectedDifficulties, setSelectedDifficulties] = useState([]);
+  const [selectedProgressStatus, setSelectedProgressStatus] = useState("all");
   const [query, setQuery] = useState("");
   const [stagedTopics, setStagedTopics] = useState([]);
   const [stagedDifficulties, setStagedDifficulties] = useState([]);
+  const [stagedProgressStatus, setStagedProgressStatus] = useState("all");
   const [stagedQuery, setStagedQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -47,8 +36,9 @@ const ProblemsPage = () => {
   useEffect(() => {
     setStagedTopics(selectedTopics);
     setStagedDifficulties(selectedDifficulties);
+    setStagedProgressStatus(selectedProgressStatus);
     setStagedQuery(query);
-  }, [selectedTopics, selectedDifficulties, query]);
+  }, [selectedTopics, selectedDifficulties, selectedProgressStatus, query]);
 
   // Fetch problems from API with filters (batch loading)
   useEffect(() => {
@@ -67,6 +57,10 @@ const ProblemsPage = () => {
         
         if (selectedDifficulties.length > 0) {
           params.append('difficulties', selectedDifficulties.join(','));
+        }
+
+        if (selectedProgressStatus === 'attempted' || selectedProgressStatus === 'solved') {
+          params.append('progress_status', selectedProgressStatus);
         }
         
         // Search in both title and problem ID
@@ -93,7 +87,7 @@ const ProblemsPage = () => {
     };
 
     fetchProblems();
-  }, [selectedTopics, selectedDifficulties, query, batchPage]);
+  }, [selectedTopics, selectedDifficulties, selectedProgressStatus, query, batchPage]);
 
   const handleTopicToggle = (topic) => {
     setStagedTopics((prev) =>
@@ -111,6 +105,7 @@ const ProblemsPage = () => {
     // Apply staged filters
     setSelectedTopics(stagedTopics);
     setSelectedDifficulties(stagedDifficulties);
+    setSelectedProgressStatus(stagedProgressStatus);
     setQuery(stagedQuery);
     // Reset to page 1 and batch 1 when searching
     setCurrentPage(1);
@@ -200,12 +195,38 @@ const ProblemsPage = () => {
                 </div>
               </div>
 
+              {isSignedIn && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-2">Status</label>
+                  <div className="flex flex-wrap gap-4">
+                    {[
+                      { value: "all", label: "All" },
+                      { value: "attempted", label: "Attempted" },
+                      { value: "solved", label: "Solved" },
+                    ].map((option) => (
+                      <label key={option.value} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="progressStatus"
+                          value={option.value}
+                          checked={stagedProgressStatus === option.value}
+                          onChange={(e) => setStagedProgressStatus(e.target.value)}
+                          className="w-4 h-4 border-white/20 bg-white/5 cursor-pointer"
+                        />
+                        <span className="text-sm text-slate-300">{option.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Filter Actions */}
               <div className="flex items-center justify-between">
                 <button
                   onClick={() => {
                     setStagedTopics([]);
                     setStagedDifficulties([]);
+                    setStagedProgressStatus("all");
                     setStagedQuery("");
                   }}
                   className="text-xs text-cyan-300 hover:text-cyan-200 transition hover:cursor-pointer"

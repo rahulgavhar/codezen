@@ -375,6 +375,42 @@ export const getPublicUserProfileService = async (username) => {
 };
 
 /**
+ * Get public user activity by username service
+ */
+export const getPublicUserActivityService = async (username) => {
+  try {
+    const profile = await usersRepo.getUserProfileByUsername(username);
+
+    if (!profile) {
+      return null;
+    }
+
+    return usersRepo.getUserActivity(profile.clerk_user_id);
+  } catch (error) {
+    console.error("Error in getPublicUserActivityService:", error);
+    throw error;
+  }
+};
+
+/**
+ * Get public user rating history by username service
+ */
+export const getPublicUserRatingHistoryService = async (username) => {
+  try {
+    const profile = await usersRepo.getUserProfileByUsername(username);
+
+    if (!profile) {
+      return null;
+    }
+
+    return usersRepo.getUserRatingHistory(profile.clerk_user_id);
+  } catch (error) {
+    console.error("Error in getPublicUserRatingHistoryService:", error);
+    throw error;
+  }
+};
+
+/**
  * Upload resume to Supabase Storage and extract skills through external API
  */
 export const uploadResumeAndExtractSkillsService = async (

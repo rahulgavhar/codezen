@@ -1,6 +1,27 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import axiosInstance from "../../lib/axios";
 
+const ME_PROFILE_QUERY = `
+  query MeProfile {
+    meProfile {
+      clerk_user_id
+      app_role
+      username
+      display_name
+      email
+      avatar_url
+      bio
+      rating
+      max_rating
+      problems_solved
+      contests_participated
+      skills
+      is_banned
+      created_at
+    }
+  }
+`;
+
 /* ================================
    Async Thunks
    ================================ */
@@ -13,11 +34,23 @@ export const fetchUserProfile = createAsyncThunk(
   "user/fetchUserProfile",
   async (_, { rejectWithValue }) => {
     try {
-      const response = await axiosInstance.get("/api/users/profile");
-      return response.data;
+      const response = await axiosInstance.post("/graphql", {
+        query: ME_PROFILE_QUERY,
+      });
+
+      if (Array.isArray(response?.data?.errors) && response.data.errors.length > 0) {
+        throw new Error(response.data.errors[0]?.message || "GraphQL request failed");
+      }
+
+      const profile = response?.data?.data?.meProfile;
+      if (!profile) {
+        throw new Error("Failed to fetch user profile");
+      }
+
+      return profile;
     } catch (error) {
       return rejectWithValue(
-        error.response?.data?.message || "Failed to fetch user profile"
+        error.response?.data?.message || error.message || "Failed to fetch user profile"
       );
     }
   }

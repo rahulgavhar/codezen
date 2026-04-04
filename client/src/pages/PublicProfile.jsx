@@ -39,6 +39,21 @@ const PublicProfile = () => {
       const response = await axiosInstance.get(`/api/users/public/${username}`);
       const profile = response.data;
 
+      const [activityResponse, ratingResponse] = await Promise.allSettled([
+        axiosInstance.get(`/api/users/public/${username}/activity`),
+        axiosInstance.get(`/api/users/public/${username}/rating-history`),
+      ]);
+
+      const activityPayload =
+        activityResponse.status === 'fulfilled' && Array.isArray(activityResponse.value?.data)
+          ? activityResponse.value.data
+          : [];
+
+      const ratingPayload =
+        ratingResponse.status === 'fulfilled' && Array.isArray(ratingResponse.value?.data)
+          ? ratingResponse.value.data
+          : [];
+
       setUserData({
         username: profile.username,
         clerkUserId: profile.clerk_user_id,
@@ -55,9 +70,8 @@ const PublicProfile = () => {
         skills: Array.isArray(profile.skills) ? profile.skills : [],
       });
 
-      // For now, using empty activity/rating (API endpoints can be added later)
-      setActivityData([]);
-      setRatingData([]);
+      setActivityData(activityPayload);
+      setRatingData(ratingPayload);
       setLoading(false);
     } catch (error) {
       console.error('Error fetching user data:', error);
@@ -300,7 +314,7 @@ const PublicProfile = () => {
                   </div>
                 ) : (
                   <>
-                    <RatingGraph contestData={ratingData || []} />
+                    <RatingGraph data={ratingData || []} />
                     {(!ratingData || ratingData.length === 0) && (
                       <div className="text-center text-sm text-base-content/60 py-4">
                         Participate in contests to build this user’s rating history!

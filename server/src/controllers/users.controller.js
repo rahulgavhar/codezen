@@ -129,6 +129,61 @@ export const getPublicUserProfile = async (req, res) => {
 };
 
 /**
+ * Get public user activity by username
+ * No authentication required
+ */
+export const getPublicUserActivity = async (req, res) => {
+  try {
+    const { username } = req.params;
+
+    if (!username) {
+      return res.status(400).json({ error: "Username is required" });
+    }
+
+    const activity = await usersService.getPublicUserActivityService(username);
+
+    if (activity === null) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    return res.status(200).json(activity);
+  } catch (error) {
+    console.error("Error in getPublicUserActivity:", error);
+    return res.status(500).json({
+      error: error.message || "Failed to fetch user activity",
+    });
+  }
+};
+
+/**
+ * Get public user rating history by username
+ * No authentication required
+ */
+export const getPublicUserRatingHistory = async (req, res) => {
+  try {
+    const { username } = req.params;
+
+    if (!username) {
+      return res.status(400).json({ error: "Username is required" });
+    }
+
+    const ratingHistory =
+      await usersService.getPublicUserRatingHistoryService(username);
+
+    if (ratingHistory === null) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    return res.status(200).json(ratingHistory);
+  } catch (error) {
+    console.error("Error in getPublicUserRatingHistory:", error);
+    return res.status(500).json({
+      error: error.message || "Failed to fetch user rating history",
+    });
+  }
+};
+
+/**
  * Get user profile by clerk ID
  * No authentication required (public endpoint for interviews)
  */

@@ -8,7 +8,12 @@ import Header from '../components/Header';
 import Footer from '../components/Footer';
 import RatingGraph from '../components/RatingGraph';
 import { useUserData } from '../redux/hooks/useUserData.js';
-import { updateUserProfile, updateUserLocally } from '../redux/slices/userSlice.js';
+import {
+  fetchUserActivity,
+  fetchUserRatingHistory,
+  updateUserProfile,
+  updateUserLocally,
+} from '../redux/slices/userSlice.js';
 import axiosInstance from '../lib/axios.js';
 import toast from 'react-hot-toast';
 
@@ -44,6 +49,15 @@ const MyProfile = () => {
       navigate('/sign-in');
     }
   }, [isSignedIn, navigate]);
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      return;
+    }
+
+    dispatch(fetchUserActivity());
+    dispatch(fetchUserRatingHistory());
+  }, [dispatch, isSignedIn]);
 
   // Initialize edit data when profile loads
   useEffect(() => {

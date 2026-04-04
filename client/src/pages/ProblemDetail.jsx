@@ -536,6 +536,24 @@ class Main {
         isFullSubmit: true,
         error_message: submissionData.error_message || null,
       });
+
+      setProblem((prev) => {
+        if (!prev) return prev;
+
+        const nextAttempts = Number(prev.user_attempts || 0) + 1;
+        const nextStatus =
+          submissionData.verdict === "accepted"
+            ? "solved"
+            : prev.user_status === "solved"
+            ? "solved"
+            : "attempted";
+
+        return {
+          ...prev,
+          user_attempts: nextAttempts,
+          user_status: nextStatus,
+        };
+      });
     } catch (error) {
       console.error("Error submitting:", error);
       const errorMessage = error.response?.data?.message || error.message || "Unknown error";
@@ -585,6 +603,17 @@ class Main {
     medium: "bg-amber-400/15 text-amber-200 border-amber-400/30",
     hard: "bg-rose-400/15 text-rose-200 border-rose-400/30",
   };
+  const userStatusBadgeColor = {
+    solved: "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
+    attempted: "bg-amber-500/15 text-amber-200 border-amber-500/40",
+    unsolved: "bg-slate-500/15 text-slate-300 border-slate-500/40",
+  };
+  const userStatusLabel =
+    problem?.user_status === "solved"
+      ? "Solved"
+      : problem?.user_status === "attempted"
+      ? "Attempted"
+      : "Unsolved";
 
   return (
     <div className="flex h-screen flex-col bg-slate-950 text-slate-50">
@@ -726,8 +755,18 @@ class Main {
                     >
                       {problem.difficulty || "Easy"}
                     </span>
+                    <span
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                        userStatusBadgeColor[problem.user_status || "unsolved"]
+                      }`}
+                    >
+                      {userStatusLabel}
+                    </span>
                     <span className="text-xs text-slate-400">
                       Acceptance: {problem.acceptance?.toFixed(1) || 0}%
+                    </span>
+                    <span className="text-xs text-slate-400">
+                      Your Attempts: {problem.user_attempts || 0}
                     </span>
                   </div>
                 </div>
