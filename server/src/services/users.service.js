@@ -1,4 +1,189 @@
 import * as usersRepo from "../repositories/users.repo.js";
+import { ENV } from "../config/env.config.js";
+import { supabase, ensureSupabaseConfigured } from "../config/supabase.client.js";
+
+const JOB_RECOMMENDATION_API_URL = String(
+  ENV.JOB_RECOMMENDATION_API_URL || "https://job-scrapper-mrj1.onrender.com"
+).replace(/\/+$/, "");
+const RESUMES_STORAGE_BUCKET = ENV.RESUMES_STORAGE_BUCKET || "resumes";
+const DEFAULT_TOP_RECOMMENDATIONS = 20;
+const MAX_TOP_RECOMMENDATIONS = 50;
+
+const SKILL_PAYLOAD_KEYS = [
+  "skills",
+  "skill",
+  "extracted_skills",
+  "technical_skills",
+  "matched_skills",
+  "skill_set",
+  "skillset",
+];
+
+const buildHttpError = (message, statusCode = 500) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const normalizeSkills = (skills = []) => {
+  if (!Array.isArray(skills)) {
+    return [];
+  }
+
+  const seen = new Set();
+  const normalized = [];
+
+  for (const entry of skills) {
+    if (typeof entry !== "string") continue;
+
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+
+    const dedupeKey = trimmed.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+
+    seen.add(dedupeKey);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
+};
+
+const extractSkillsFromPayload = (payload) => {
+  if (Array.isArray(payload)) {
+    return normalizeSkills(payload);
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  for (const key of SKILL_PAYLOAD_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(payload, key)) {
+      const extracted = extractSkillsFromPayload(payload[key]);
+      if (extracted.length > 0) {
+        return extracted;
+      }
+    }
+  }
+
+  for (const value of Object.values(payload)) {
+    const extracted = extractSkillsFromPayload(value);
+    if (extracted.length > 0) {
+      return extracted;
+    }
+  }
+
+  return [];
+};
+
+const getJobApiUrl = (endpoint) => {
+  const normalizedEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  return `${JOB_RECOMMENDATION_API_URL}${normalizedEndpoint}`;
+};
+
+const sanitizeFileName = (name) => {
+  if (!name || typeof name !== "string") {
+    return "resume";
+  }
+
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+};
+
+const parseTopN = (value) => {
+  const parsed = Number.parseInt(String(value ?? DEFAULT_TOP_RECOMMENDATIONS), 10);
+  if (Number.isNaN(parsed)) {
+    return DEFAULT_TOP_RECOMMENDATIONS;
+  }
+
+  return Math.min(Math.max(parsed, 1), MAX_TOP_RECOMMENDATIONS);
+};
+
+const buildRecommendationsResponse = (payload, topN) => {
+  const recommendations = Array.isArray(payload?.recommendations)
+    ? payload.recommendations
+    : [];
+
+  return {
+    success: Boolean(payload?.success ?? true),
+    extracted_skills: normalizeSkills(payload?.extracted_skills || []),
+    skills_count: Number(payload?.skills_count || 0),
+    recommendations,
+    recommendations_count: Number(payload?.recommendations_count || recommendations.length),
+    error: payload?.error || null,
+    requested_top_n: topN,
+  };
+};
+
+const callJobApiWithFile = async (endpoint, file) => {
+  const formData = new FormData();
+  const fileBlob = new Blob([file.buffer], {
+    type: file.mimetype || "application/octet-stream",
+  });
+  formData.append("file", fileBlob, file.originalname || "resume");
+
+  const response = await fetch(getJobApiUrl(endpoint), {
+    method: "POST",
+    body: formData,
+  });
+
+  const responseText = await response.text();
+  let parsedBody = null;
+
+  if (responseText) {
+    try {
+      parsedBody = JSON.parse(responseText);
+    } catch {
+      parsedBody = { message: responseText };
+    }
+  }
+
+  if (!response.ok) {
+    throw buildHttpError(
+      `Job recommendation API request failed for ${endpoint} with status ${response.status}`,
+      502
+    );
+  }
+
+  return parsedBody || {};
+};
+
+const callJobApiGet = async (endpoint, queryParams = {}) => {
+  const params = new URLSearchParams();
+  Object.entries(queryParams).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") {
+      return;
+    }
+    params.set(key, String(value));
+  });
+
+  const baseUrl = getJobApiUrl(endpoint);
+  const requestUrl = params.size > 0 ? `${baseUrl}?${params.toString()}` : baseUrl;
+
+  const response = await fetch(requestUrl, {
+    method: "GET",
+  });
+
+  const responseText = await response.text();
+  let parsedBody = null;
+
+  if (responseText) {
+    try {
+      parsedBody = JSON.parse(responseText);
+    } catch {
+      parsedBody = { message: responseText };
+    }
+  }
+
+  if (!response.ok) {
+    throw buildHttpError(
+      `Job recommendation API request failed for ${endpoint} with status ${response.status}`,
+      502
+    );
+  }
+
+  return parsedBody || {};
+};
 
 /**
  * Get user profile service
@@ -152,6 +337,200 @@ export const getPublicUserProfileService = async (username) => {
     };
   } catch (error) {
     console.error("Error in getPublicUserProfileService:", error);
+    throw error;
+  }
+};
+
+/**
+ * Upload resume to Supabase Storage and extract skills through external API
+ */
+export const uploadResumeAndExtractSkillsService = async (
+  clerkUserId,
+  file,
+  options = {}
+) => {
+  try {
+    if (!file?.buffer || !file?.originalname) {
+      throw buildHttpError("Invalid resume file payload", 400);
+    }
+
+    const currentProfile = await usersRepo.getUserProfileByClerkId(clerkUserId);
+    if (!currentProfile) {
+      throw buildHttpError("User profile not found", 404);
+    }
+
+    if (currentProfile.app_role !== "user") {
+      throw buildHttpError("Only users can upload resumes and extract skills", 403);
+    }
+
+    const topN = parseTopN(options?.top_n);
+
+    ensureSupabaseConfigured();
+
+    const safeName = sanitizeFileName(file.originalname);
+    const storagePath = `${clerkUserId}/${Date.now()}-${safeName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(RESUMES_STORAGE_BUCKET)
+      .upload(storagePath, file.buffer, {
+        contentType: file.mimetype || "application/octet-stream",
+        upsert: true,
+        cacheControl: "3600",
+      });
+
+    if (uploadError) {
+      throw buildHttpError(`Failed to upload resume: ${uploadError.message}`, 500);
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from(RESUMES_STORAGE_BUCKET)
+      .getPublicUrl(storagePath);
+
+    const uploadedStorageUrl = publicUrlData?.publicUrl || null;
+
+    let uploadResumeResponse = {};
+    let analyzeResumeResponse = {};
+    let getRecommendationsResponse = {};
+
+    const warnings = [];
+
+    try {
+      uploadResumeResponse = await callJobApiWithFile("/upload-resume", file);
+    } catch (error) {
+      warnings.push(`upload-resume failed: ${error.message}`);
+    }
+
+    try {
+      analyzeResumeResponse = await callJobApiWithFile("/analyze-resume", file);
+    } catch (error) {
+      warnings.push(`analyze-resume failed: ${error.message}`);
+    }
+
+    try {
+      const recommendationsPayload = await callJobApiGet("/get-recommendations", {
+        top_n: topN,
+      });
+      getRecommendationsResponse = buildRecommendationsResponse(
+        recommendationsPayload,
+        topN
+      );
+    } catch (error) {
+      warnings.push(`get-recommendations failed: ${error.message}`);
+      getRecommendationsResponse = buildRecommendationsResponse(
+        {
+          success: false,
+          recommendations: [],
+          recommendations_count: 0,
+          error: error.message,
+          extracted_skills: [],
+          skills_count: 0,
+        },
+        topN
+      );
+    }
+
+    const normalizedSkills = normalizeSkills([
+      ...(normalizeSkills(uploadResumeResponse?.skills || []) || []),
+      ...(normalizeSkills(analyzeResumeResponse?.extracted_skills || []) || []),
+      ...(normalizeSkills(getRecommendationsResponse?.extracted_skills || []) || []),
+      ...extractSkillsFromPayload(uploadResumeResponse),
+      ...extractSkillsFromPayload(analyzeResumeResponse),
+    ]);
+
+    let persistedSkills = normalizeSkills(currentProfile.skills || []);
+    let extracted = normalizedSkills.length > 0;
+
+    if (normalizedSkills.length > 0) {
+      const updatedProfile = await usersRepo.updateUserSkills(clerkUserId, normalizedSkills);
+      persistedSkills = normalizeSkills(updatedProfile?.skills || []);
+    }
+
+    const uploadResumeRecommendations = Array.isArray(uploadResumeResponse?.recommendations)
+      ? uploadResumeResponse.recommendations
+      : [];
+
+    const analyzeResumeRecommendations = Array.isArray(analyzeResumeResponse?.recommendations)
+      ? analyzeResumeResponse.recommendations
+      : [];
+
+    return {
+      success: true,
+      message:
+        uploadResumeResponse?.message ||
+        (extracted
+          ? "Resume processed successfully"
+          : "Resume uploaded but no skills were extracted"),
+      extracted,
+      skills: persistedSkills,
+      resume: {
+        bucket: RESUMES_STORAGE_BUCKET,
+        path: storagePath,
+        storage_url: uploadedStorageUrl,
+        original_name: file.originalname,
+        mime_type: file.mimetype,
+        size_bytes: file.size,
+      },
+      upload_resume: {
+        success: Boolean(uploadResumeResponse?.success ?? warnings.length === 0),
+        message: uploadResumeResponse?.message || null,
+        file_name: uploadResumeResponse?.file_name || file.originalname,
+        file_path: uploadResumeResponse?.file_path || storagePath,
+        storage_url: uploadResumeResponse?.storage_url || uploadedStorageUrl,
+        skills: normalizeSkills(uploadResumeResponse?.skills || []),
+        recommendations: uploadResumeRecommendations,
+        recommendations_count: Number(
+          uploadResumeResponse?.recommendations_count ||
+            uploadResumeRecommendations.length
+        ),
+      },
+      analyze_resume: {
+        success: Boolean(analyzeResumeResponse?.success ?? true),
+        extracted_skills: normalizeSkills(analyzeResumeResponse?.extracted_skills || []),
+        skills_count: Number(
+          analyzeResumeResponse?.skills_count ||
+            normalizeSkills(analyzeResumeResponse?.extracted_skills || []).length
+        ),
+        recommendations: analyzeResumeRecommendations,
+        recommendations_count: Number(
+          analyzeResumeResponse?.recommendations_count ||
+            analyzeResumeRecommendations.length
+        ),
+        error: analyzeResumeResponse?.error || null,
+      },
+      get_recommendations: getRecommendationsResponse,
+      warnings,
+    };
+  } catch (error) {
+    console.error("Error in uploadResumeAndExtractSkillsService:", error);
+    throw error;
+  }
+};
+
+/**
+ * Fetch personalized job recommendations for signed-in user
+ */
+export const getPersonalizedJobRecommendationsService = async (
+  clerkUserId,
+  queryParams = {}
+) => {
+  try {
+    const currentProfile = await usersRepo.getUserProfileByClerkId(clerkUserId);
+    if (!currentProfile) {
+      throw buildHttpError("User profile not found", 404);
+    }
+
+    if (currentProfile.app_role !== "user") {
+      throw buildHttpError("Only users can fetch personalized recommendations", 403);
+    }
+
+    const topN = parseTopN(queryParams?.top_n);
+    const payload = await callJobApiGet("/get-recommendations", {
+      top_n: topN,
+    });
+
+    return buildRecommendationsResponse(payload, topN);
+  } catch (error) {
+    console.error("Error in getPersonalizedJobRecommendationsService:", error);
     throw error;
   }
 };

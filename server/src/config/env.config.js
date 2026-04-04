@@ -27,4 +27,8 @@ export const ENV = {
   REPLAY_FLUSH_INTERVAL_MS: process.env.REPLAY_FLUSH_INTERVAL_MS || "2000",
   REPLAY_FLUSH_EVENT_THRESHOLD: process.env.REPLAY_FLUSH_EVENT_THRESHOLD || "500",
   REPLAY_FLUSH_MAX_EVENTS: process.env.REPLAY_FLUSH_MAX_EVENTS || "500",
+  JOB_RECOMMENDATION_API_URL:
+    process.env.JOB_RECOMMENDATION_API_URL || "https://job-scrapper-mrj1.onrender.com",
+  RESUMES_STORAGE_BUCKET: process.env.RESUMES_STORAGE_BUCKET || "resumes",
+  REDIS: process.env.REDIS || "",
 };

@@ -154,3 +154,68 @@ export const getUserProfileByClerkId = async (req, res) => {
     });
   }
 };
+
+/**
+ * Upload resume, store in Supabase Storage, and extract skills via job recommendation API
+ * Requires authentication (Clerk)
+ */
+export const uploadResumeAndExtractSkills = async (req, res) => {
+  try {
+    const auth = req.auth();
+    const clerkUserId = auth?.userId;
+
+    if (!clerkUserId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: "Resume file is required" });
+    }
+
+    const result = await usersService.uploadResumeAndExtractSkillsService(
+      clerkUserId,
+      req.file,
+      {
+        top_n: req.body?.top_n,
+      }
+    );
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("Error in uploadResumeAndExtractSkills:", error);
+
+    const statusCode = error?.statusCode || 500;
+    return res.status(statusCode).json({
+      error: error.message || "Failed to process resume",
+    });
+  }
+};
+
+/**
+ * Get personalized recommendations from Job Recommendation API
+ * Requires authentication (Clerk)
+ */
+export const getPersonalizedJobRecommendations = async (req, res) => {
+  try {
+    const auth = req.auth();
+    const clerkUserId = auth?.userId;
+
+    if (!clerkUserId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const recommendations =
+      await usersService.getPersonalizedJobRecommendationsService(clerkUserId, {
+        top_n: req.query?.top_n,
+      });
+
+    return res.status(200).json(recommendations);
+  } catch (error) {
+    console.error("Error in getPersonalizedJobRecommendations:", error);
+
+    const statusCode = error?.statusCode || 500;
+    return res.status(statusCode).json({
+      error: error.message || "Failed to fetch recommendations",
+    });
+  }
+};

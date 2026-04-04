@@ -186,10 +186,12 @@ export async function getContestLeaderboard(req, res, next) {
 		const { contestId } = req.params;
 		const page = req.query?.page;
 		const limit = req.query?.limit;
+		const clerkUserId = req.query?.clerk_user_id;
 
 		const leaderboardResult = await contestService.getContestLeaderboard(contestId, {
 			page,
 			limit,
+			clerk_user_id: clerkUserId,
 		});
 
 		return res.status(200).json(leaderboardResult);

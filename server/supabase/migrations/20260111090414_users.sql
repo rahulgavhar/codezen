@@ -28,6 +28,10 @@ CREATE TABLE public.user_profiles (
     -- Company name (unique, lowercase, enforced null for users, optional for staff, before onboarding)
   company_name TEXT UNIQUE CHECK (app_role = 'staff' OR company_name IS NULL),
 
+    skills TEXT[],
+    CONSTRAINT user_profiles_skills_only_for_users
+        CHECK (skills IS NULL OR app_role = 'user'),
+
     -- Competitive rating
     rating INT NOT NULL DEFAULT 1200
         CHECK (rating >= 0),

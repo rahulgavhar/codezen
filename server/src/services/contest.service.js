@@ -1,6 +1,7 @@
 import * as contestsRepo from '../repositories/contests.repo.js';
 import * as submissionsRepo from '../repositories/submissions.repo.js';
 import * as contestReplayService from './contestReplay.service.js';
+import { getRedisClient } from '../config/redis.client.js';
 
 function buildHttpError(message, statusCode) {
 	const error = new Error(message);
@@ -112,6 +113,217 @@ const terminalVerdicts = new Set([
 	'exec_format_error',
 	'error',
 ]);
+
+const LEADERBOARD_KEY_PREFIX = 'leaderboard';
+const LEADERBOARD_SCORE_SOLVED_FACTOR = 1_000_000;
+const LEADERBOARD_DEFAULT_LIMIT = 50;
+const LEADERBOARD_MAX_LIMIT = 500;
+
+function getContestStatus(contest) {
+	if (!contest?.start_time || !contest?.end_time) {
+		return 'Upcoming';
+	}
+
+	const now = Date.now();
+	const start = new Date(contest.start_time).getTime();
+	const end = new Date(contest.end_time).getTime();
+
+	if (Number.isNaN(start) || Number.isNaN(end)) {
+		return 'Upcoming';
+	}
+
+	if (now < start) return 'Upcoming';
+	if (now >= start && now < end) return 'Live';
+	return 'Ended';
+}
+
+function getLeaderboardKey(contestId) {
+	return `${LEADERBOARD_KEY_PREFIX}:${contestId}`;
+}
+
+function encodeLeaderboardScore(solved, penalty) {
+	const solvedPart = Math.max(0, Number(solved) || 0) * LEADERBOARD_SCORE_SOLVED_FACTOR;
+	const penaltyPart = Math.max(0, Number(penalty) || 0);
+	return solvedPart - penaltyPart;
+}
+
+function buildContestLeaderboardRows(contest, problems, submissions, registrants) {
+	const startTime = new Date(contest.start_time).getTime();
+	if (Number.isNaN(startTime)) {
+		throw buildHttpError('Contest start_time is invalid', 500);
+	}
+
+	const users = new Set();
+	registrants.forEach((item) => users.add(item.clerk_user_id));
+	submissions.forEach((item) => users.add(item.clerk_user_id));
+
+	const profileByUserId = new Map(
+		registrants.map((item) => [item.clerk_user_id, item])
+	);
+
+	const submissionsAsc = [...submissions].sort(
+		(a, b) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime()
+	);
+
+	return Array.from(users).map((userId) => {
+		const profile = profileByUserId.get(userId);
+		const handle =
+			profile?.username ||
+			profile?.display_name ||
+			`${userId?.slice(0, 8) || 'user'}...`;
+
+		const perProblem = {};
+		let hasAttempted = false;
+		problems.forEach((problem) => {
+			perProblem[problem.id] = {
+				acceptedAt: null,
+				wrongAttemptsBeforeAccepted: 0,
+			};
+		});
+
+		submissionsAsc.forEach((entry) => {
+			if (entry.clerk_user_id !== userId) return;
+			if (entry.verdict && entry.verdict !== 'pending') {
+				hasAttempted = true;
+			}
+
+			const problemState = perProblem[entry.contest_problem_id];
+			if (!problemState) return;
+
+			if (!problemState.acceptedAt && entry.verdict === 'accepted') {
+				problemState.acceptedAt = new Date(entry.submitted_at);
+				return;
+			}
+
+			if (!problemState.acceptedAt && entry.verdict && entry.verdict !== 'pending') {
+				problemState.wrongAttemptsBeforeAccepted += 1;
+			}
+		});
+
+		let solved = 0;
+		let penalty = 0;
+		const problemResults = {};
+
+		problems.forEach((problem) => {
+			const problemState = perProblem[problem.id];
+			if (!problemState) {
+				return;
+			}
+
+			if (problemState.acceptedAt) {
+				const diffMinutes = Math.max(
+					0,
+					Math.floor((problemState.acceptedAt.getTime() - startTime) / (1000 * 60))
+				);
+				const problemPenalty = diffMinutes + problemState.wrongAttemptsBeforeAccepted * 10;
+
+				solved += 1;
+				penalty += problemPenalty;
+				problemResults[problem.id] = {
+					solved: true,
+					penalty: problemPenalty,
+					wrongAttempts: problemState.wrongAttemptsBeforeAccepted,
+				};
+				return;
+			}
+
+			if (problemState.wrongAttemptsBeforeAccepted > 0) {
+				problemResults[problem.id] = {
+					solved: false,
+					penalty: problemState.wrongAttemptsBeforeAccepted * 10,
+					wrongAttempts: problemState.wrongAttemptsBeforeAccepted,
+				};
+			}
+		});
+
+		return {
+			userId,
+			handle,
+			solved,
+			penalty,
+			hasAttempted,
+			problemResults,
+		};
+	});
+}
+
+async function getLiveLeaderboardFromRedis(contestId, rows, page, limit, targetUserId = null) {
+	const redis = await getRedisClient();
+	if (!redis) {
+		return null;
+	}
+
+	const key = getLeaderboardKey(contestId);
+	const startIndex = (page - 1) * limit;
+	const endIndex = startIndex + limit - 1;
+
+	const rowByUserId = new Map(rows.map((row) => [row.userId, row]));
+	const pipeline = redis.pipeline();
+
+	pipeline.del(key);
+	for (const row of rows) {
+		pipeline.zadd(key, encodeLeaderboardScore(row.solved, row.penalty), row.userId);
+	}
+	pipeline.zcard(key);
+	pipeline.zrevrange(key, startIndex, endIndex, 'WITHSCORES');
+	if (targetUserId) {
+		pipeline.zrevrank(key, targetUserId);
+	}
+
+	const results = await pipeline.exec();
+	if (!Array.isArray(results) || results.length < 2) {
+		return null;
+	}
+
+	const totalResultIndex = targetUserId ? results.length - 3 : results.length - 2;
+	const rangeResultIndex = targetUserId ? results.length - 2 : results.length - 1;
+	const userRankResultIndex = targetUserId ? results.length - 1 : -1;
+
+	const totalResult = results[totalResultIndex];
+	const rangeResult = results[rangeResultIndex];
+	const total = Number(totalResult?.[1] || 0);
+	const pairs = Array.isArray(rangeResult?.[1]) ? rangeResult[1] : [];
+
+	const data = [];
+	for (let index = 0; index < pairs.length; index += 2) {
+		const userId = pairs[index];
+		const row = rowByUserId.get(userId);
+		if (!row) continue;
+
+		data.push({
+			...row,
+			rank: startIndex + data.length + 1,
+		});
+	}
+
+	const pages = total === 0 ? 0 : Math.ceil(total / limit);
+	let myStanding = null;
+
+	if (targetUserId) {
+		const rankRaw = results[userRankResultIndex]?.[1];
+		if (typeof rankRaw === 'number') {
+			const row = rowByUserId.get(targetUserId);
+			if (row) {
+				myStanding = {
+					...row,
+					rank: rankRaw + 1,
+				};
+			}
+		}
+	}
+
+	return {
+		data,
+		pagination: {
+			page,
+			limit,
+			count: data.length,
+			total,
+			pages,
+		},
+		my_standing: myStanding,
+	};
+}
 
 function buildContestSubmissionPayload(contestId, contestProblemId, clerkUserId, submission) {
 	const normalizedVerdict = submission.verdict === 'error' ? 'internal_error' : submission.verdict;
@@ -414,7 +626,12 @@ export async function getContestLeaderboard(contestId, queryParams = {}) {
 		throw buildHttpError('Contest not found', 404);
 	}
 
-	const { page, limit } = parsePageAndLimit(queryParams, 10, 50);
+	const { page, limit } = parsePageAndLimit(
+		queryParams,
+		LEADERBOARD_DEFAULT_LIMIT,
+		LEADERBOARD_MAX_LIMIT
+	);
+	const targetUserId = String(queryParams?.clerk_user_id || '').trim() || null;
 	const contestProblems = await contestsRepo.fetchContestProblems(contestId);
 	const submissions = await contestsRepo.fetchContestSubmissions(contestId);
 	const registrants = await contestsRepo.fetchAllContestRegistrants(contestId);
@@ -430,91 +647,28 @@ export async function getContestLeaderboard(contestId, queryParams = {}) {
 				total: 0,
 				pages: 0,
 			},
+			my_standing: null,
 		};
 	}
 
-	const startTime = new Date(contest.start_time).getTime();
-	if (Number.isNaN(startTime)) {
-		throw buildHttpError('Contest start_time is invalid', 500);
+	const rows = buildContestLeaderboardRows(contest, problems, submissions, registrants);
+	const contestStatus = getContestStatus(contest);
+
+	if (contestStatus === 'Live') {
+		const liveResult = await getLiveLeaderboardFromRedis(
+			contestId,
+			rows,
+			page,
+			limit,
+			targetUserId
+		);
+		if (liveResult) {
+			return liveResult;
+		}
 	}
-
-	const users = new Set();
-	registrants.forEach((item) => users.add(item.clerk_user_id));
-	submissions.forEach((item) => users.add(item.clerk_user_id));
-
-	const profileByUserId = new Map(
-		registrants.map((item) => [item.clerk_user_id, item])
-	);
-
-	const submissionsAsc = [...submissions].sort(
-		(a, b) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime()
-	);
-
-	const rows = Array.from(users).map((userId) => {
-		const profile = profileByUserId.get(userId);
-		const handle =
-			profile?.username ||
-			profile?.display_name ||
-			`${userId?.slice(0, 8) || 'user'}...`;
-
-		const perProblem = {};
-		let hasAttempted = false;
-		problems.forEach((problem) => {
-			perProblem[problem.id] = {
-				acceptedAt: null,
-				wrongAttemptsBeforeAccepted: 0,
-			};
-		});
-
-		submissionsAsc.forEach((entry) => {
-			if (entry.clerk_user_id !== userId) return;
-			if (entry.verdict && entry.verdict !== 'pending') {
-				hasAttempted = true;
-			}
-
-			const problemState = perProblem[entry.contest_problem_id];
-			if (!problemState) return;
-
-			if (!problemState.acceptedAt && entry.verdict === 'accepted') {
-				problemState.acceptedAt = new Date(entry.submitted_at);
-				return;
-			}
-
-			if (!problemState.acceptedAt && entry.verdict && entry.verdict !== 'pending') {
-				problemState.wrongAttemptsBeforeAccepted += 1;
-			}
-		});
-
-		let solved = 0;
-		let penalty = 0;
-
-		problems.forEach((problem) => {
-			const problemState = perProblem[problem.id];
-			if (!problemState?.acceptedAt) {
-				return;
-			}
-
-			const diffMinutes = Math.max(
-				0,
-				Math.floor((problemState.acceptedAt.getTime() - startTime) / (1000 * 60))
-			);
-			const problemPenalty = diffMinutes + problemState.wrongAttemptsBeforeAccepted * 10;
-
-			solved += 1;
-			penalty += problemPenalty;
-		});
-
-		return {
-			userId,
-			handle,
-			solved,
-			penalty,
-			hasAttempted,
-		};
-	});
 
 	const ranked = rows
-		.filter((row) => row.solved > 0 || row.hasAttempted)
+		.filter((row) => row.solved > 0 || row.hasAttempted || contestStatus === 'Live')
 		.sort((a, b) => b.solved - a.solved || a.penalty - b.penalty || a.handle.localeCompare(b.handle))
 		.map((row, index) => ({
 			...row,
@@ -525,6 +679,9 @@ export async function getContestLeaderboard(contestId, queryParams = {}) {
 	const pages = total === 0 ? 0 : Math.ceil(total / limit);
 	const startIndex = (page - 1) * limit;
 	const paginatedRows = ranked.slice(startIndex, startIndex + limit);
+	const myStanding = targetUserId
+		? ranked.find((row) => row.userId === targetUserId) || null
+		: null;
 
 	return {
 		data: paginatedRows,
@@ -535,5 +692,6 @@ export async function getContestLeaderboard(contestId, queryParams = {}) {
 			total,
 			pages,
 		},
+		my_standing: myStanding,
 	};
 }

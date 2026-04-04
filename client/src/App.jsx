@@ -30,6 +30,7 @@ import StaffContestDetail from "./pages/staff/StaffContestDetail.jsx";
 import StaffInterviews from "./pages/staff/StaffInterviews.jsx";
 import StaffScheduleInterview from "./pages/staff/StaffScheduleInterview.jsx";
 import StaffInterviewDetail from "./pages/staff/StaffInterviewDetail.jsx";
+import JobRecommendations from "./pages/JobRecommendations.jsx";
 
 function App() {
   const { isSignedIn, isLoaded } = useUser();
@@ -111,6 +112,10 @@ function App() {
         <Route
           path="/my-submissions"
           element={isSignedIn && profile?.app_role !== 'staff' ? <MySubmissions /> : <Navigate to="/" />}
+        />
+        <Route
+          path="/jobs/recommendations"
+          element={isSignedIn && profile?.app_role !== 'staff' ? <JobRecommendations /> : <Navigate to="/" />}
         />
         <Route
           path="/submissions/:submissionId"

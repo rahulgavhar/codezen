@@ -73,6 +73,30 @@ export const updateUserProfile = async (clerkUserId, updateData) => {
 };
 
 /**
+ * Update user skills
+ */
+export const updateUserSkills = async (clerkUserId, skills = []) => {
+  try {
+    const { data, error } = await supabase
+      .from("user_profiles")
+      .update({ skills })
+      .eq("clerk_user_id", clerkUserId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error updating user skills:", error);
+      throw error;
+    }
+
+    return data;
+  } catch (error) {
+    console.error("Error in updateUserSkills:", error);
+    throw error;
+  }
+};
+
+/**
  * Get user activity (submission counts by date)
  */
 export const getUserActivity = async (clerkUserId) => {

@@ -78,6 +78,9 @@ const formatCountdown = (targetDate) => {
     .join(":");
 };
 
+const LEADERBOARD_LIMIT = 25;
+const LEADERBOARD_POLL_INTERVAL_MS = 60_000;
+
 const OngoingContest = () => {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -93,7 +96,17 @@ const OngoingContest = () => {
   const [countdown, setCountdown] = useState("--:--:--");
   const [problems, setProblems] = useState([]);
   const [submissions, setSubmissions] = useState([]);
-  const [registrants, setRegistrants] = useState([]);
+  const [standings, setStandings] = useState([]);
+  const [leaderboardPagination, setLeaderboardPagination] = useState({
+    page: 1,
+    limit: LEADERBOARD_LIMIT,
+    count: 0,
+    total: 0,
+    pages: 0,
+  });
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [leaderboardError, setLeaderboardError] = useState("");
+  const [myStanding, setMyStanding] = useState(null);
 
   useEffect(() => {
     hasEndPopupShownRef.current = false;
@@ -145,13 +158,10 @@ const OngoingContest = () => {
         setLoading(true);
         setError("");
 
-        const [contestRes, problemsRes, submissionsRes, registrantsRes] = await Promise.all([
+        const [contestRes, problemsRes, submissionsRes] = await Promise.all([
           axiosInstance.get(`/api/contests/${id}`),
           axiosInstance.get(`/api/contests/${id}/problems`),
           axiosInstance.get(`/api/contests/${id}/submissions`),
-          axiosInstance.get(`/api/contests/${id}/registrants`, {
-            params: { page: 1, limit: 50 },
-          }),
         ]);
 
         const incomingProblems = Array.isArray(problemsRes.data) ? problemsRes.data : [];
@@ -163,7 +173,6 @@ const OngoingContest = () => {
         setContest(contestRes.data || null);
         setProblems(mappedProblems);
         setSubmissions(Array.isArray(submissionsRes.data) ? submissionsRes.data : []);
-        setRegistrants(Array.isArray(registrantsRes.data?.data) ? registrantsRes.data.data : []);
       } catch (err) {
         console.error("Failed to load ongoing contest data:", err);
         setError(err.response?.data?.message || "Failed to load ongoing contest data");
@@ -176,6 +185,72 @@ const OngoingContest = () => {
       fetchContestData();
     }
   }, [id, isAccessChecking]);
+
+  useEffect(() => {
+    if (!id || isAccessChecking || !contest) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const fetchLeaderboard = async () => {
+      try {
+        setLeaderboardLoading(true);
+        setLeaderboardError("");
+
+        const response = await axiosInstance.get(`/api/contests/${id}/leaderboard`, {
+          params: {
+            page: 1,
+            limit: LEADERBOARD_LIMIT,
+            clerk_user_id: user?.id,
+          },
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        const rows = Array.isArray(response.data?.data) ? response.data.data : [];
+        const pagination = response.data?.pagination || {
+          page: 1,
+          limit: LEADERBOARD_LIMIT,
+          count: rows.length,
+          total: rows.length,
+          pages: rows.length > 0 ? 1 : 0,
+        };
+
+        setStandings(rows);
+        setLeaderboardPagination(pagination);
+        setMyStanding(response.data?.my_standing || null);
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        console.error("Failed to load live leaderboard:", err);
+        setStandings([]);
+        setMyStanding(null);
+        setLeaderboardError(err.response?.data?.message || "Failed to load live leaderboard");
+      } finally {
+        if (!cancelled) {
+          setLeaderboardLoading(false);
+        }
+      }
+    };
+
+    fetchLeaderboard();
+
+    if (getContestStatus(contest) !== "Live") {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const intervalId = setInterval(fetchLeaderboard, LEADERBOARD_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [contest, id, isAccessChecking, user?.id]);
 
   useEffect(() => {
     if (!contest?.start_time || !contest?.end_time) {
@@ -244,109 +319,11 @@ const OngoingContest = () => {
       });
   }, [problems, submissions, user?.id]);
 
-  const standings = useMemo(() => {
-    if (!contest?.start_time || problems.length === 0) {
-      return [];
-    }
-
-    const startTime = new Date(contest.start_time).getTime();
-    if (Number.isNaN(startTime)) {
-      return [];
-    }
-
-    const users = new Set();
-    registrants.forEach((item) => users.add(item.clerk_user_id));
-    submissions.forEach((item) => users.add(item.clerk_user_id));
-
-    const submissionsAsc = [...submissions].sort(
-      (a, b) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime()
-    );
-
-    const rows = Array.from(users).map((userId) => {
-      const profileEntry = registrants.find((item) => item.clerk_user_id === userId);
-      const handle =
-        profileEntry?.username ||
-        profileEntry?.display_name ||
-        `${userId?.slice(0, 8) || "user"}...`;
-
-      const perProblem = {};
-      problems.forEach((problem) => {
-        perProblem[problem.id] = {
-          acceptedAt: null,
-          wrongAttemptsBeforeAccepted: 0,
-        };
-      });
-
-      submissionsAsc.forEach((entry) => {
-        if (entry.clerk_user_id !== userId) return;
-
-        const problemState = perProblem[entry.contest_problem_id];
-        if (!problemState) return;
-
-        const verdict = entry.verdict;
-        if (!problemState.acceptedAt && verdict === "accepted") {
-          problemState.acceptedAt = new Date(entry.submitted_at);
-          return;
-        }
-
-        if (!problemState.acceptedAt && verdict && verdict !== "pending") {
-          problemState.wrongAttemptsBeforeAccepted += 1;
-        }
-      });
-
-      let solved = 0;
-      let penalty = 0;
-      const problemResults = {};
-
-      problems.forEach((problem) => {
-        const problemState = perProblem[problem.id];
-        if (!problemState) return;
-
-        if (problemState.acceptedAt) {
-          const diffMinutes = Math.max(
-            0,
-            Math.floor((problemState.acceptedAt.getTime() - startTime) / (1000 * 60))
-          );
-          const problemPenalty = diffMinutes + problemState.wrongAttemptsBeforeAccepted * 10;
-
-          solved += 1;
-          penalty += problemPenalty;
-          problemResults[problem.id] = {
-            solved: true,
-            penalty: problemPenalty,
-            wrongAttempts: problemState.wrongAttemptsBeforeAccepted,
-          };
-          return;
-        }
-
-        if (problemState.wrongAttemptsBeforeAccepted > 0) {
-          problemResults[problem.id] = {
-            solved: false,
-            penalty: problemState.wrongAttemptsBeforeAccepted * 10,
-            wrongAttempts: problemState.wrongAttemptsBeforeAccepted,
-          };
-        }
-      });
-
-      return {
-        userId,
-        handle,
-        solved,
-        penalty,
-        problemResults,
-      };
-    });
-
-    return rows
-      .filter((row) => row.solved > 0 || Object.keys(row.problemResults).length > 0)
-      .sort((a, b) => b.solved - a.solved || a.penalty - b.penalty || a.handle.localeCompare(b.handle))
-      .map((row, index) => ({
-        ...row,
-        rank: index + 1,
-      }));
-  }, [contest?.start_time, problems, registrants, submissions]);
-
   const contestStatus = useMemo(() => getContestStatus(contest), [contest, countdown]);
+  const displayStandings = useMemo(
+    () => standings.filter((row) => row.userId !== myStanding?.userId),
+    [standings, myStanding?.userId]
+  );
 
   if (isAccessChecking || loading) {
     return (
@@ -523,7 +500,7 @@ const OngoingContest = () => {
                   </span>
                 )}
               </h2>
-              <span className="text-xs text-slate-400">{standings.length} Participants</span>
+              <span className="text-xs text-slate-400">{leaderboardPagination.total || standings.length} Participants</span>
             </div>
             <div className="overflow-hidden rounded-xl border border-white/5">
               <table className="w-full text-sm min-w-225">
@@ -541,19 +518,58 @@ const OngoingContest = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {standings.length === 0 && (
+                  {leaderboardLoading ? (
+                    <tr>
+                      <td className="px-4 py-6 text-center text-slate-400" colSpan={problems.length + 4}>
+                        Loading live standings...
+                      </td>
+                    </tr>
+                  ) : leaderboardError ? (
+                    <tr>
+                      <td className="px-4 py-6 text-center text-rose-300" colSpan={problems.length + 4}>
+                        {leaderboardError}
+                      </td>
+                    </tr>
+                  ) : standings.length === 0 ? (
                     <tr>
                       <td className="px-4 py-6 text-center text-slate-400" colSpan={problems.length + 4}>
                         No standings data available yet.
                       </td>
                     </tr>
+                  ) : null}
+                  {myStanding && (
+                    <tr className="bg-cyan-500/10 hover:bg-cyan-500/15">
+                      <td className="px-4 py-3 font-semibold text-cyan-200">{myStanding.rank}</td>
+                      <td className="px-4 py-3 font-semibold text-cyan-100">
+                        {myStanding.handle} (You)
+                      </td>
+                      {problems.map((problem) => {
+                        const result = myStanding.problemResults?.[problem.id];
+
+                        if (!result) {
+                          return <td key={`my-${problem.id}`} className="px-4 py-3 text-center text-slate-500" />;
+                        }
+
+                        return (
+                          <td key={`my-${problem.id}`} className="px-4 py-3 text-center">
+                            {result.solved ? (
+                              <span className="font-semibold text-emerald-400">+{result.penalty}</span>
+                            ) : (
+                              <span className="font-semibold text-rose-300">-{result.penalty}</span>
+                            )}
+                          </td>
+                        );
+                      })}
+                      <td className="px-4 py-3 font-semibold text-cyan-100">{myStanding.solved}</td>
+                      <td className="px-4 py-3 font-semibold text-cyan-100">{myStanding.penalty}</td>
+                    </tr>
                   )}
-                  {standings.map((row) => (
+                  {displayStandings.map((row) => (
                     <tr key={row.rank} className="hover:bg-white/5">
                       <td className="px-4 py-3 font-semibold text-cyan-200">{row.rank}</td>
                       <td className="px-4 py-3 font-medium text-slate-100">{row.handle}</td>
                       {problems.map((problem) => {
-                        const result = row.problemResults[problem.id];
+                        const result = row.problemResults?.[problem.id];
 
                         if (!result) {
                           return <td key={`${row.rank}-${problem.id}`} className="px-4 py-3 text-center text-slate-500" />;

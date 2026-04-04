@@ -6,7 +6,7 @@ CREATE TABLE public.tags (
 
   name TEXT NOT NULL UNIQUE
     CHECK (
-      char_length(name) BETWEEN 2 AND 32
+      char_length(name) BETWEEN 2 AND 100
       AND name = lower(name)
     )
 );

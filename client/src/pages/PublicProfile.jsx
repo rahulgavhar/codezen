@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
@@ -21,11 +21,16 @@ const PublicProfile = () => {
   const [notFound, setNotFound] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
-  useEffect(() => {
-    fetchUserData();
-  }, [username]);
+  const getRank = (rating) => {
+    if (rating >= 2400) return 'Grandmaster';
+    if (rating >= 2200) return 'Master';
+    if (rating >= 2000) return 'Expert';
+    if (rating >= 1800) return 'Specialist';
+    if (rating >= 1600) return 'Apprentice';
+    return 'Novice';
+  };
 
-  const fetchUserData = async () => {
+  const fetchUserData = useCallback(async () => {
     try {
       setLoading(true);
       setNotFound(false);
@@ -46,7 +51,8 @@ const PublicProfile = () => {
         contestsParticipated: profile.contests_participated || 0,
         rank: getRank(profile.rating || 0),
         joinDate: profile.created_at,
-        skills: profile.skills || [],
+        appRole: profile.app_role || 'user',
+        skills: Array.isArray(profile.skills) ? profile.skills : [],
       });
 
       // For now, using empty activity/rating (API endpoints can be added later)
@@ -66,16 +72,11 @@ const PublicProfile = () => {
         setLoading(false);
       }
     }
-  };
+  }, [navigate, username]);
 
-  const getRank = (rating) => {
-    if (rating >= 2400) return 'Grandmaster';
-    if (rating >= 2200) return 'Master';
-    if (rating >= 2000) return 'Expert';
-    if (rating >= 1800) return 'Specialist';
-    if (rating >= 1600) return 'Apprentice';
-    return 'Novice';
-  };
+  useEffect(() => {
+    fetchUserData();
+  }, [fetchUserData]);
 
   const handleCopyUsername = async () => {
     try {
@@ -204,21 +205,29 @@ const PublicProfile = () => {
                     </p>
                   </div>
 
-                  {/* Skills & Badges */}
-                  <div className="flex flex-wrap gap-3 justify-center lg:justify-start">
-                    {userData.skills.map((skill, idx) => (
-                      <span 
-                        key={idx} 
-                        className="px-4 py-2 rounded-full text-sm font-semibold backdrop-blur-sm border-2 transition-all hover:scale-105"
-                        style={{ 
-                          borderColor: 'var(--color-accent)',
-                          color: 'white'
-                        }}
-                      >
-                        {skill}
-                      </span>
-                    ))}
-                  </div>
+                  {userData.appRole === 'user' && (
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-slate-400 mb-2">Skills</p>
+                      <div className="flex flex-wrap gap-3 justify-center lg:justify-start">
+                        {userData.skills.length > 0 ? (
+                          userData.skills.map((skill, idx) => (
+                            <span 
+                              key={`${skill}-${idx}`}
+                              className="px-4 py-2 rounded-full text-sm font-semibold backdrop-blur-sm border-2 transition-all hover:scale-105"
+                              style={{ 
+                                borderColor: 'var(--color-accent)',
+                                color: 'white'
+                              }}
+                            >
+                              {skill}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-sm text-slate-500">No skills added yet.</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Meta Info */}
                   <div className="flex flex-wrap gap-6 justify-center lg:justify-start text-sm text-base-content/60 pt-2">

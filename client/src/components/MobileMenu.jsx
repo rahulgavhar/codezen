@@ -41,6 +41,7 @@ const MobileMenu = ({ isMenuOpen, setIsMenuOpen }) => {
     : [
         { label: "Dashboard", path: "/" },
         { label: "Contests", path: "/contests" },
+        { label: "Jobs", path: "/jobs/recommendations" },
         { label: "Practice", path: "/problems" },
         { label: "IDE", path: "/ide" },
         { label: "Profile", path: `/profile/${username}` },

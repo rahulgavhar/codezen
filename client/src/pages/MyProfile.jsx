@@ -8,7 +8,9 @@ import Header from '../components/Header';
 import Footer from '../components/Footer';
 import RatingGraph from '../components/RatingGraph';
 import { useUserData } from '../redux/hooks/useUserData.js';
-import { updateUserProfile } from '../redux/slices/userSlice.js';
+import { updateUserProfile, updateUserLocally } from '../redux/slices/userSlice.js';
+import axiosInstance from '../lib/axios.js';
+import toast from 'react-hot-toast';
 
 const MyProfile = () => {
   const { user, isSignedIn } = useUser();
@@ -25,13 +27,16 @@ const MyProfile = () => {
     ratingHistoryLoading,
     error,
     refetchUserData,
-    refetchActivity,
-    refetchRatingHistory,
   } = useUserData();
 
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({});
   const [isCopied, setIsCopied] = useState(false);
+  const [resumeFile, setResumeFile] = useState(null);
+  const [isResumeUploading, setIsResumeUploading] = useState(false);
+  const [recommendationLimit, setRecommendationLimit] = useState(20);
+  const [resumeInsights, setResumeInsights] = useState(null);
+  const [recommendedJobs, setRecommendedJobs] = useState([]);
 
   // Redirect if not signed in
   useEffect(() => {
@@ -76,6 +81,54 @@ const MyProfile = () => {
       setTimeout(() => setIsCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy:', err);
+    }
+  };
+
+  const handleResumeUpload = async () => {
+    if (!resumeFile) {
+      toast.error('Please choose a resume file first.');
+      return;
+    }
+
+    try {
+      setIsResumeUploading(true);
+
+      const formData = new FormData();
+      formData.append('resume', resumeFile);
+      formData.append('top_n', String(recommendationLimit));
+
+      const response = await axiosInstance.post('/api/users/resume', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      const extractedSkills = Array.isArray(response?.data?.skills)
+        ? response.data.skills
+        : [];
+
+      const recommendationRows = Array.isArray(response?.data?.get_recommendations?.recommendations)
+        ? response.data.get_recommendations.recommendations
+        : [];
+      const uploadRecommendationRows = Array.isArray(response?.data?.upload_resume?.recommendations)
+        ? response.data.upload_resume.recommendations
+        : [];
+
+      dispatch(updateUserLocally({ skills: extractedSkills }));
+      setResumeInsights(response?.data || null);
+      setRecommendedJobs((recommendationRows.length > 0 ? recommendationRows : uploadRecommendationRows).slice(0, 6));
+      setResumeFile(null);
+
+      if (response?.data?.extracted) {
+        toast.success(response?.data?.message || 'Resume uploaded and skills updated.');
+      } else {
+        toast(response?.data?.message || 'Resume uploaded, but no skills were extracted.', { icon: '!' });
+      }
+    } catch (error) {
+      console.error('Error uploading resume:', error);
+      toast.error(error?.response?.data?.error || 'Failed to upload resume.');
+    } finally {
+      setIsResumeUploading(false);
     }
   };
 
@@ -134,6 +187,7 @@ const MyProfile = () => {
     max_rating: profile.max_rating || profile.rating || 1200,
     problems_solved: profile.problems_solved || 0,
     contests_participated: profile.contests_participated || 0,
+    skills: Array.isArray(profile.skills) ? profile.skills : [],
     email: profile.email || user?.emailAddresses?.[0]?.emailAddress || '',
     created_at: profile.created_at,
     app_role: profile.app_role || 'user',
@@ -337,11 +391,133 @@ const MyProfile = () => {
                         </span>
                       </div>
                     </div>
+
+                    {displayData.app_role === 'user' && (
+                      <div className="pt-3">
+                        <p className="text-xs uppercase tracking-wide text-slate-400 mb-2">Skills</p>
+                        <div className="flex flex-wrap gap-2 justify-center lg:justify-start">
+                          {displayData.skills.length > 0 ? (
+                            displayData.skills.map((skill, idx) => (
+                              <span
+                                key={`${skill}-${idx}`}
+                                className="px-3 py-1 rounded-full text-xs font-semibold border border-cyan-400/40 text-cyan-200 bg-cyan-500/10"
+                              >
+                                {skill}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-sm text-slate-500">No skills extracted yet. Upload a resume below.</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
             </div>
           </div>
+
+          {displayData.app_role === 'user' && (
+            <div className="card bg-slate-900 shadow-xl border border-slate-800">
+              <div className="card-body p-6 lg:p-8">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-1 h-8 rounded-full" style={{ background: 'linear-gradient(180deg, var(--color-accent), var(--color-info))' }}></div>
+                  <h2 className="text-xl font-bold text-slate-50">Resume Skills Sync</h2>
+                </div>
+                <p className="text-sm text-slate-400 mb-4">
+                  Upload your resume to extract skills automatically and keep your profile skills fresh.
+                </p>
+                <div className="flex flex-col md:flex-row md:items-center gap-3">
+                  <input
+                    type="file"
+                    accept=".pdf,.doc,.docx,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                    className="file-input file-input-bordered bg-slate-800 border-slate-700 w-full md:max-w-md"
+                    onChange={(e) => setResumeFile(e.target.files?.[0] || null)}
+                  />
+                  <select
+                    className="select select-bordered bg-slate-800 border-slate-700"
+                    value={recommendationLimit}
+                    onChange={(e) => setRecommendationLimit(Number(e.target.value) || 20)}
+                  >
+                    <option value={10}>Top 10 Jobs</option>
+                    <option value={20}>Top 20 Jobs</option>
+                    <option value={30}>Top 30 Jobs</option>
+                    <option value={40}>Top 40 Jobs</option>
+                    <option value={50}>Top 50 Jobs</option>
+                  </select>
+                  <button
+                    className="px-6 py-2 rounded-lg font-semibold transition-all disabled:opacity-50"
+                    style={{ background: 'var(--color-accent)', color: 'var(--color-accent-content)' }}
+                    onClick={handleResumeUpload}
+                    disabled={!resumeFile || isResumeUploading}
+                  >
+                    {isResumeUploading ? 'Uploading...' : 'Upload Resume'}
+                  </button>
+                </div>
+
+                {resumeInsights && (
+                  <div className="mt-6 space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-4">
+                        <p className="text-xs uppercase tracking-wide text-cyan-200">Upload Skills</p>
+                        <p className="mt-1 text-2xl font-black text-cyan-100">
+                          {resumeInsights?.upload_resume?.skills?.length || 0}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+                        <p className="text-xs uppercase tracking-wide text-emerald-200">Analyzed Skills</p>
+                        <p className="mt-1 text-2xl font-black text-emerald-100">
+                          {resumeInsights?.analyze_resume?.skills_count || 0}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-violet-500/30 bg-violet-500/10 p-4">
+                        <p className="text-xs uppercase tracking-wide text-violet-200">Job Matches</p>
+                        <p className="mt-1 text-2xl font-black text-violet-100">
+                          {resumeInsights?.get_recommendations?.recommendations_count || 0}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        className="px-4 py-2 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 text-sm font-semibold hover:bg-cyan-500/20 transition"
+                        onClick={() => navigate('/jobs/recommendations')}
+                      >
+                        View Full Job Recommendations
+                      </button>
+                    </div>
+
+                    {recommendedJobs.length > 0 ? (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {recommendedJobs.slice(0, 4).map((job, idx) => (
+                          <div
+                            key={`${job?.url || job?.title || 'job'}-${idx}`}
+                            className="rounded-xl border border-slate-700 bg-slate-800/60 p-4"
+                          >
+                            <p className="text-sm font-bold text-slate-100 line-clamp-2">{job?.title || job?.position || 'Role'}</p>
+                            <p className="mt-1 text-xs text-slate-400">{job?.company || 'Unknown company'} • {job?.location || 'Unknown location'}</p>
+                            <p className="mt-1 text-xs text-slate-500">{job?.work_type || 'N/A'} • Match {job?.match_score ?? 'N/A'}</p>
+                            {job?.url && (
+                              <a
+                                href={job.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="mt-3 inline-flex text-xs font-semibold text-cyan-300 hover:text-cyan-200"
+                              >
+                                Open Job ↗
+                              </a>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-500">Upload a resume to see matched jobs preview here.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Stats Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

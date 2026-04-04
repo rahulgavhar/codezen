@@ -29,6 +29,7 @@ import { trackActivityAndStartVM } from "./middleware/auth.middleware.js";
 import { setupInterviewSignaling } from "./lib/webrtc.signaling.js";
 import { setupContestReplaySignaling } from "./lib/contestReplay.signaling.js";
 import { startContestReplayWorker, stopContestReplayWorker } from "./services/contestReplay.service.js";
+import { closeRedisClient } from "./config/redis.client.js";
 
 // Middleware
 
@@ -143,6 +144,7 @@ const gracefulShutdown = async (signal) => {
   try {
     console.log(`Received ${signal}. Flushing replay buffers before shutdown...`);
     await stopContestReplayWorker();
+    await closeRedisClient();
   } catch (error) {
     console.error('Error while stopping replay worker:', error);
   } finally {
