@@ -21,8 +21,6 @@ export async function getPublishedProblems(options = {}) {
     progressStatus = '',
   } = options;
 
-  const offset = (page - 1) * limit;
-
   // Start with base query for published problems
   let query = supabase
     .from('problems')
@@ -47,8 +45,7 @@ export async function getPublishedProblems(options = {}) {
       { count: 'exact' }
     )
     .eq('status', 'published')
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
+    .order('created_at', { ascending: false });
 
   // Apply difficulty filter if provided
   if (difficulties.length > 0) {
@@ -56,12 +53,14 @@ export async function getPublishedProblems(options = {}) {
   }
 
   // Execute base query first
-  let { data: problems, error: baseError, count: totalCount } = await query;
+  let { data: problems, error: baseError } = await query;
 
   if (baseError) {
     console.error('Error fetching problems:', baseError);
     throw baseError;
   }
+
+  problems = Array.isArray(problems) ? problems : [];
 
   // Apply topic filter in memory (post-fetch) since we need to join through tags
   if (topics.length > 0) {
@@ -152,13 +151,15 @@ export async function getPublishedProblems(options = {}) {
     );
   }
 
-  // Get total count for pagination (accounting for filters)
+  // Pagination should be applied after all filters are resolved.
   const filteredTotal = formattedProblems.length;
+  const pageStartIndex = (page - 1) * limit;
+  const paginatedProblems = formattedProblems.slice(pageStartIndex, pageStartIndex + limit);
 
   return {
-    data: formattedProblems.slice(0, limit), // Apply pagination to filtered results
-    count: formattedProblems.slice(0, limit).length, // Current page count
-    total: totalCount, // Total published problems
+    data: paginatedProblems,
+    count: paginatedProblems.length,
+    total: filteredTotal,
     page,
     limit,
   };

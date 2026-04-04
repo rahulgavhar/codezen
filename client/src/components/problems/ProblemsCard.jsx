@@ -18,7 +18,6 @@ export default function ProblemsCard({ problem }) {
   const {
     title,
     difficulty,
-    tags = [],
     acceptance,
     user_status,
   } = problem;
@@ -46,7 +45,6 @@ export default function ProblemsCard({ problem }) {
           {difficulty}
         </span>
       </div>
-      <p className="mt-2 text-sm text-slate-300">{Array.isArray(tags) ? tags.join(", ") : ""}</p>
       <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-300">
         <span className="rounded-lg bg-white/5 px-2.5 py-1">Acceptance: {acceptanceValue}%</span>
         <span className={`rounded-lg bg-white/5 px-2.5 py-1 font-semibold ${statusTone[normalizedUserStatus]}`}>
